@@ -1,5 +1,7 @@
 # Illumio MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@alexgoller/illumio-mcp-server)](https://smithery.ai/server/@alexgoller/illumio-mcp-server)
+
 A Model Context Protocol (MCP) server that provides an interface to interact with Illumio PCE (Policy Compute Engine). This server enables programmatic access to Illumio workload management, label operations, and traffic flow analysis.
 
 ## What can it do?
@@ -18,6 +20,14 @@ Use conversational AI to talk to your PCE:
 - Valid API credentials for the PCE
 
 ## Installation
+
+### Installing via Smithery
+
+To install Illumio MCP Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@alexgoller/illumio-mcp-server):
+
+```bash
+npx -y @smithery/cli install @alexgoller/illumio-mcp-server --client claude
+```
 
 1. Clone the repository:
 
