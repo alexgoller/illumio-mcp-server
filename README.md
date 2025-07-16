@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/alexgoller-illumio-mcp-server-badge.png)](https://mseep.ai/app/alexgoller-illumio-mcp-server)
+
 # Illumio MCP Server
 
 A Model Context Protocol (MCP) server that provides an interface to interact with Illumio PCE (Policy Compute Engine). This server enables programmatic access to Illumio workload management, label operations, and traffic flow analysis.
