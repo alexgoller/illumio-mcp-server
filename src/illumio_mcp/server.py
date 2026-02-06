@@ -131,19 +131,27 @@ async def handle_get_prompt(
                     content=types.TextContent(
                         type="text",
                         text=f"""
-                            Ringfence the application {arguments['application_name']} in the environment {arguments['application_environment']}.
-                            Always reference labels as hrefs like /orgs/1/labels/57 or similar.
-                            Consumers means the source of the traffic, providers means the destination of the traffic.
-                            First, retrieve all the traffic flows inside the application and environment. Analyze the connections. Then retrieve all the traffic flows inbound to the application and environment.
-                            Inside the app, please be sure to have rules for each role or app tier to connect to the other tiers.  
-                            Always use traffic flows to find out what other applications and environemnts need to connect into {arguments['application_name']}, 
-                            and then deploy rulesets to limit the inbound traffic to those applications and environments. 
-                            For traffic that is required to connect outbound from {arguments['application_name']}, deploy rulesets to limit the 
-                            outbound traffic to those applications and environments. If a consumer is coming from the same app and env, please use 
-                            all workloads for the rules inside the scope (intra-scope). If it comes from the outside, please use app, env and if possible role
-                            If a remote app is connected as destination, a new ruleset needs to be created that has the name of the remote app and env,
-                            all incoming connections need to be added as extra-scope rules in that ruleset.
-                            The logic in illumio is the following.
+Ringfence the application {arguments['application_name']} in the environment {arguments['application_environment']}.
+Always reference labels as hrefs like /orgs/1/labels/57 or similar.
+Consumers means the source of the traffic, providers means the destination of the traffic.
+
+1. First, get all the labels to have them available for later use.
+2. Retrieve all the traffic flows inside the application and environment. 
+   Only fetch potentially blocked or blocked traffic.Analyze the connections.
+3. Then retrieve all the traffic flows inbound to the application and environment.
+4. Inside the app, please be sure to have rules for each role or app tier to connect to the other tiers. 
+5. Prefer the traffic summary over the traffic flow tool.
+
+Always use traffic flows to find out what other applications and environemnts need to connect into {arguments['application_name']}, 
+and then deploy rulesets to limit the inbound traffic to those applications and environments. 
+For traffic that is required to connect outbound from {arguments['application_name']}, deploy rulesets to limit the 
+outbound traffic to those applications and environments. If a consumer is coming from the same app and env, please use 
+all workloads for the rules inside the scope (intra-scope). If it comes from the outside, please use app, env and if possible role
+
+If a remote app is connected as destination, a new ruleset needs to be created that has the name of the remote app and env,
+all incoming connections need to be added as extra-scope rules in that ruleset.
+Always use hrefs for labels and workloads.
+The logic in illumio is the following:
 
 If a scope exists. Rules define connections within the scope if unscoped consumers is not set to true. Unscoped consumers define inbound traffic from things outside the scope. The unscoped consumer is a set of labels being the source of inbound traffic. Provider is the destination. For the provider a value of AMS (short for all workloads) means that a connection is allowed for all workloads inside the scope. So for example if the source is role=monitoring, app=nagios, env=prod, then the rule for the app=ordering, env=prod application would be:
 
@@ -163,6 +171,8 @@ unscoped consumers: false
 
 This is a intra-scope rule allowing the role=loadbalancer,app=ordering,env=prod workloads to connect to the role=web,app=ordering,env=prod workloads on port 8080/tcp. 
 
+For traffic that goes from the {arguments['application_name']} app to the outside, please create a ruleset with the name {arguments['application_name']}-outbound and make it scopeless.
+Add all the outbound traffic to that ruleset using roles, applications and environments as labels.
                         """
                     )
                 )
