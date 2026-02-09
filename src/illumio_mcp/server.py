@@ -460,17 +460,19 @@ async def handle_list_tools() -> list[types.Tool]:
         # add a delete-ruleset tool, either by href or name
         types.Tool(
             name="delete-ruleset",
-            description="Delete a ruleset from the PCE",
+            description="Delete a ruleset from the PCE. Provide either 'href' or 'name' (but not both) to identify the ruleset.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "href": {"type": "string"},
-                    "name": {"type": "string"}
-                },
-                "oneOf": [
-                    {"required": ["href"]},
-                    {"required": ["name"]}
-                ]
+                    "href": {
+                        "type": "string",
+                        "description": "Href of the ruleset to delete (e.g., /orgs/1/sec_policy/active/rule_sets/123)"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the ruleset to delete (alternative to href)"
+                    }
+                }
             }
         ),
         types.Tool(
@@ -611,31 +613,27 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="update-label",
-            description="Update an existing label in the PCE",
+            description="Update an existing label in the PCE. Provide either: 1) href + new_value (optionally with key), or 2) key + value + new_value to identify and update the label.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "href": {
                         "type": "string",
-                        "description": "Label href (e.g., /orgs/1/labels/42). Either href or both key and value must be provided to identify the label."
+                        "description": "Label href (e.g., /orgs/1/labels/42). Use this to directly identify the label."
                     },
                     "key": {
                         "type": "string",
-                        "description": "Label type (e.g., role, app, env, loc)"
+                        "description": "Label type (e.g., role, app, env, loc). Required when using value to identify label, or when using href."
                     },
                     "value": {
                         "type": "string",
-                        "description": "Current value of the label"
+                        "description": "Current value of the label. Used with key to identify the label when href is not provided."
                     },
                     "new_value": {
                         "type": "string",
-                        "description": "New value for the label"
+                        "description": "New value for the label. Always required."
                     }
-                },
-                "oneOf": [
-                    {"required": ["href", "key", "new_value"]},
-                    {"required": ["key", "value", "new_value"]}
-                ]
+                }
             }
         ),
         types.Tool(
@@ -689,13 +687,13 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="update-iplist",
-            description="Update an existing IP List in the PCE",
+            description="Update an existing IP List in the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "href": {
                         "type": "string",
-                        "description": "Href of the IP List to update"
+                        "description": "Href of the IP List to update (e.g., /orgs/1/sec_policy/draft/ip_lists/123)"
                     },
                     "name": {
                         "type": "string",
@@ -736,43 +734,35 @@ async def handle_list_tools() -> list[types.Tool]:
                         "type": "string",
                         "description": "New Fully Qualified Domain Name (optional)"
                     }
-                },
-                "oneOf": [
-                    {"required": ["href"]},
-                    {"required": ["name"]}
-                ]
+                }
             }
         ),
         types.Tool(
             name="delete-iplist",
-            description="Delete an IP List from the PCE",
+            description="Delete an IP List from the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "href": {
                         "type": "string",
-                        "description": "Href of the IP List to delete"
+                        "description": "Href of the IP List to delete (e.g., /orgs/1/sec_policy/draft/ip_lists/123)"
                     },
                     "name": {
                         "type": "string",
                         "description": "Name of the IP List to delete (alternative to href)"
                     }
-                },
-                "oneOf": [
-                    {"required": ["href"]},
-                    {"required": ["name"]}
-                ]
+                }
             }
         ),
         types.Tool(
             name="update-ruleset",
-            description="Update an existing ruleset in the PCE",
+            description="Update an existing ruleset in the PCE. Provide either 'href' or 'name' (but not both) to identify the ruleset.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "href": {
                         "type": "string",
-                        "description": "Href of the ruleset to update"
+                        "description": "Href of the ruleset to update (e.g., /orgs/1/sec_policy/active/rule_sets/123)"
                     },
                     "name": {
                         "type": "string",
@@ -788,55 +778,15 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                     "scopes": {
                         "type": "array",
-                        "description": "New scopes for the ruleset",
+                        "description": "New scopes for the ruleset. Each scope is an array of label identifiers (either href strings like '/orgs/1/labels/42', or key=value strings like 'role=web', or objects with href property).",
                         "items": {
                             "type": "array",
                             "items": {
-                                "oneOf": [
-                                    {
-                                        "type": "string",
-                                        "description": "Label href or key=value string"
-                                    },
-                                    {
-                                        "type": "object",
-                                        "properties": {
-                                            "href": {
-                                                "type": "string",
-                                                "description": "Label href"
-                                            }
-                                        },
-                                        "required": ["href"]
-                                    }
-                                ]
+                                "description": "Label identifier - can be a string (href or key=value) or an object with href property"
                             }
                         }
                     }
-                },
-                "oneOf": [
-                    {"required": ["href"]},
-                    {"required": ["name"]}
-                ]
-            }
-        ),
-        types.Tool(
-            name="delete-ruleset",
-            description="Delete a ruleset from the PCE",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "href": {
-                        "type": "string",
-                        "description": "Href of the ruleset to delete"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the ruleset to delete (alternative to href)"
-                    }
-                },
-                "oneOf": [
-                    {"required": ["href"]},
-                    {"required": ["name"]}
-                ]
+                }
             }
         ),
     ]
