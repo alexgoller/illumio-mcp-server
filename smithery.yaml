@@ -1,0 +1,49 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - pceHost
+      - pcePort
+      - pceOrgId
+      - apiKey
+      - apiSecret
+    properties:
+      pceHost:
+        type: string
+        description: The hostname of the Illumio PCE instance.
+      pcePort:
+        type: string
+        description: The port to connect to the Illumio PCE instance.
+      pceOrgId:
+        type: string
+        description: The organization ID for the Illumio PCE instance.
+      apiKey:
+        type: string
+        description: The API key credential for the Illumio PCE.
+      apiSecret:
+        type: string
+        description: The API secret credential for the Illumio PCE.
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({
+      command: 'illumio-mcp',
+      args: [],
+      env: {
+        PCE_HOST: config.pceHost,
+        PCE_PORT: config.pcePort,
+        PCE_ORG_ID: config.pceOrgId,
+        API_KEY: config.apiKey,
+        API_SECRET: config.apiSecret
+      }
+    })
+  exampleConfig:
+    pceHost: pce.example.com
+    pcePort: "443"
+    pceOrgId: "1"
+    apiKey: example_api_key
+    apiSecret: example_api_secret
