@@ -56,9 +56,6 @@ API_SECRET = os.getenv("API_SECRET")
 
 MCP_BUG_MAX_RESULTS = 500
 
-# Store notes as a simple key-value dict to demonstrate state management
-notes: dict[str, str] = {}
-
 server = Server("illumio-mcp")
 logging.debug("Server initialized")
 
@@ -69,17 +66,6 @@ async def handle_list_prompts() -> list[types.Prompt]:
         Each prompt can have optional arguments to customize its behavior.
     """
     return [
-        types.Prompt(
-            name="summarize-notes",
-            description="Creates a summary of all notes",
-            arguments=[
-                types.PromptArgument(
-                    name="style",
-                    description="Style of the summary (brief/detailed)",
-                    required=False,
-                )
-            ],
-        ),
         types.Prompt(
             name="ringfence-application",
             description="Ringfence an application by deploying rulesets to limit the inbound and outbound traffic",
@@ -211,26 +197,14 @@ async def handle_list_tools() -> list[types.Tool]:
     """
     return [
         types.Tool(
-            name="add-note",
-            description="Add a new note",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "content": {"type": "string"},
-                },
-                "required": ["name", "content"],
-            },
-        ),
-        types.Tool(
             name="get-workloads",
             description="Get workloads from the PCE",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
+                    "name": {"type": "string", "description": "Filter workloads by name (optional)"},
                 },
-                "required": ["name"],
+                "required": [],
             },
         ),
         types.Tool(
@@ -241,11 +215,11 @@ async def handle_list_tools() -> list[types.Tool]:
                 "properties": {
                     "name": {"type": "string"},
                     "ip_addresses": {"type": "array", "items": {"type": "string"}},
-                    "labels": {"type": "array", "items": 
-                               {"key": {"type": "string"}, "value": {"type": "string"}}
+                    "labels": {"type": "array", "items":
+                               {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}
                     },
                 },
-                "required": ["name", "ip_addresses"],
+                "required": ["name"],
             }
         ),
         types.Tool(
@@ -268,8 +242,8 @@ async def handle_list_tools() -> list[types.Tool]:
                 "properties": {
                     "name": {"type": "string"},
                     "ip_addresses": {"type": "array", "items": {"type": "string"}},
-                    "labels": {"type": "array", "items": 
-                               {"key": {"type": "string"}, "value": {"type": "string"}}
+                    "labels": {"type": "array", "items":
+                               {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}
                     },
                 },
                 "required": ["name", "ip_addresses"],
@@ -453,24 +427,6 @@ async def handle_list_tools() -> list[types.Tool]:
                     "enabled": {
                         "type": "boolean",
                         "description": "Filter by enabled/disabled status (optional)"
-                    }
-                }
-            }
-        ),
-        # add a delete-ruleset tool, either by href or name
-        types.Tool(
-            name="delete-ruleset",
-            description="Delete a ruleset from the PCE. Provide either 'href' or 'name' (but not both) to identify the ruleset.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "href": {
-                        "type": "string",
-                        "description": "Href of the ruleset to delete (e.g., /orgs/1/sec_policy/active/rule_sets/123)"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the ruleset to delete (alternative to href)"
                     }
                 }
             }
@@ -814,7 +770,10 @@ async def handle_call_tool(
             logger.debug(f"PCE connection status: {connection_status}")
             
             logger.debug("Fetching workloads from PCE")
-            workloads = pce.workloads.get(params={"include": "labels", "max_results": 10000})
+            params = {"include": "labels", "max_results": 10000}
+            if arguments and arguments.get('name'):
+                params['name'] = arguments['name']
+            workloads = pce.workloads.get(params=params)
             logger.debug(f"Successfully retrieved {len(workloads)} workloads")
             return [types.TextContent(
                 type="text",
@@ -832,9 +791,10 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            connection_status = pce.check_connection()
             return [types.TextContent(
                 type="text",
-                text=f"PCE connection successful"
+                text=f"PCE connection successful: {connection_status}"
             )]
         except Exception as e:
             error_msg = f"Failed in PCE operation: {str(e)}"
@@ -991,25 +951,19 @@ async def handle_call_tool(
                     workload_labels.append(workload_label)
 
                 logger.debug(f"Labels: {workload_labels}")
-                if workload_labels:
+                if interfaces and workload_labels:
+                    workload = pce.workloads.update(workload[0], interfaces=interfaces, labels=workload_labels)
+                elif workload_labels:
                     workload = pce.workloads.update(workload[0], labels=workload_labels)
-                    logger.debug(f"Workload update status: {workload}")
-                    return [types.TextContent(
-                    type="text",
-                    text=f"Workload updated with status: {workload}"
-                )]
-
                 elif interfaces:
                     workload = pce.workloads.update(workload[0], interfaces=interfaces)
-                    logger.debug(f"Workload update status: {workload}")
+                else:
                     return [types.TextContent(
-                    type="text",
-                    text=f"Workload updated with status: {workload}"
-                )]
-                elif interfaces and workload_labels:
-                    workload = pce.workloads.update(workload[0], interfaces=interfaces, labels=workload_labels)
-                    logger.debug(f"Workload update status: {workload}")
-                    return [types.TextContent(
+                        type="text",
+                        text="Workload unchanged: no labels or ip_addresses provided"
+                    )]
+                logger.debug(f"Workload update status: {workload}")
+                return [types.TextContent(
                     type="text",
                     text=f"Workload updated with status: {workload}"
                 )]
@@ -1036,7 +990,7 @@ async def handle_call_tool(
                 pce.workloads.delete(workload[0])
                 return [types.TextContent(
                     type="text",
-                    text=f"Workload deleted with status: {status}"
+                    text=f"Workload deleted successfully: {arguments['name']}"
                 )]
             else:
                 return [types.TextContent(
@@ -1265,7 +1219,7 @@ async def handle_call_tool(
             if arguments.get('enabled') is not None:
                 params['enabled'] = arguments['enabled']
 
-            rulesets = pce.rule_sets.get_all()
+            rulesets = pce.rule_sets.get(params=params) if params else pce.rule_sets.get_all()
             
             # Convert rulesets to serializable format
             ruleset_data = []
@@ -1613,32 +1567,6 @@ async def handle_call_tool(
                 type="text",
                 text=json.dumps({"error": error_msg})
             )]
-    elif name == "delete-ruleset":
-        logger.debug("=" * 80)
-        logger.debug("DELETE RULESET CALLED")
-        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
-        logger.debug("=" * 80)
-
-        # add implementation here for delete-ruleset
-        try:
-            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
-            pce.set_credentials(API_KEY, API_SECRET)
-            # check if href or name is provided, for href, delete, for name, get and delete 
-            if "href" in arguments:
-                pce.rule_sets.delete(arguments["href"])
-            elif "name" in arguments:
-                rulesets = pce.rule_sets.get(params={"name": arguments["name"]})
-                if rulesets:
-                    pce.rule_sets.delete(rulesets[0].href)
-                    return [types.TextContent(type="text", text=json.dumps({"success": "Ruleset deleted successfully"}))]
-                else:
-                    return [types.TextContent(type="text", text=json.dumps({"error": "Ruleset not found"}))]
-            else:
-                return [types.TextContent(type="text", text=json.dumps({"error": "Either href or name must be provided"}))]
-        except Exception as e:
-            error_msg = f"Failed to delete ruleset: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
     elif name == "get-services":
         logger.debug("=" * 80)
         logger.debug("GET SERVICES CALLED")
@@ -2251,7 +2179,7 @@ def to_dataframe(flows):
                         value = label_href_map[l.href]['value']
                         f[f'dst_{key}'] = value
 
-                series_array.append(f)
+            series_array.append(f)
         except AttributeError as e:
             logger.debug(f"Error processing flow: {e}")
             logger.debug(f"Flow object: {flow}")
