@@ -11,6 +11,8 @@ import dotenv
 import sys
 from datetime import datetime, timedelta
 from illumio import *
+from illumio.util.jsonutils import Reference
+from illumio.explorer.trafficanalysis import TrafficQueryFilter
 import pandas as pd
 from json import JSONEncoder
 from pathlib import Path
@@ -909,6 +911,43 @@ async def handle_list_tools() -> list[types.Tool]:
                     }
                 },
                 "required": ["href"]
+            }
+        ),
+        types.Tool(
+            name="create-ringfence",
+            description="""Create a ringfencing policy for an application. This analyzes traffic flows to discover
+which other apps communicate with this app, then creates a ruleset with:
+1) An intra-scope rule allowing all workloads within the app to communicate on All Services
+2) Extra-scope rules for each remote app+env discovered in traffic, allowing them in on All Services
+The result is a coarse-grained segmentation that controls which apps can talk to each other,
+reducing risk without requiring per-port policies.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Application label value (e.g., 'CRM', 'Ordering', 'ELK')"
+                    },
+                    "env_name": {
+                        "type": "string",
+                        "description": "Environment label value (e.g., 'Production', 'Staging', 'Development')"
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back for traffic flows (default: 30)",
+                        "default": 30
+                    },
+                    "ruleset_name": {
+                        "type": "string",
+                        "description": "Custom name for the ringfence ruleset (default: 'RF-<app_name>-<env_name>')"
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true, analyze traffic and report what would be created without actually creating anything (default: false)",
+                        "default": False
+                    }
+                },
+                "required": ["app_name", "env_name"]
             }
         ),
     ]
@@ -2545,6 +2584,281 @@ async def handle_call_tool(
             )]
         except Exception as e:
             error_msg = f"Failed to delete deny rule: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "create-ringfence":
+        logger.debug("=" * 80)
+        logger.debug("CREATE RINGFENCE CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            app_name = arguments["app_name"]
+            env_name = arguments["env_name"]
+            lookback_days = arguments.get("lookback_days", 30)
+            dry_run = arguments.get("dry_run", False)
+            rs_name = arguments.get("ruleset_name", f"RF-{app_name}-{env_name}")
+
+            # Step 1: Find app and env labels
+            app_labels = pce.labels.get(params={"key": "app", "value": app_name})
+            if not app_labels:
+                return [types.TextContent(type="text", text=json.dumps({"error": f"App label '{app_name}' not found"}))]
+            app_label = app_labels[0]
+
+            env_labels = pce.labels.get(params={"key": "env", "value": env_name})
+            if not env_labels:
+                return [types.TextContent(type="text", text=json.dumps({"error": f"Env label '{env_name}' not found"}))]
+            env_label = env_labels[0]
+
+            logger.debug(f"Found labels: app={app_label.href}, env={env_label.href}")
+
+            # Build label maps for resolving traffic flow labels
+            label_href_map = {}
+            for l in pce.labels.get(params={'max_results': 10000}):
+                label_href_map[l.href] = {"key": l.key, "value": l.value}
+
+            # Step 2: Find "All Services" service object
+            all_services = pce.services.get(params={"name": "All Services"})
+            all_services_href = None
+            if all_services:
+                all_services_href = all_services[0].href
+                logger.debug(f"Found All Services: {all_services_href}")
+            else:
+                logger.warning("'All Services' service object not found, will use port -1 fallback")
+
+            # Step 3: Query traffic flows for this app+env (as destination = inbound)
+            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+            # Build TrafficQueryFilter objects for the app+env labels
+            app_filter = TrafficQueryFilter(label=Reference(href=app_label.href))
+            env_filter = TrafficQueryFilter(label=Reference(href=env_label.href))
+
+            traffic_query = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                include_sources=[[]],
+                exclude_sources=[],
+                include_destinations=[[app_filter, env_filter]],
+                exclude_destinations=[],
+                include_services=[],
+                exclude_services=[],
+                policy_decisions=[],
+                exclude_workloads_from_ip_list_query=True,
+                max_results=MCP_BUG_MAX_RESULTS,
+                query_name='ringfence-inbound'
+            )
+
+            logger.debug("Querying inbound traffic flows...")
+            inbound_flows = pce.get_traffic_flows_async(
+                query_name='ringfence-inbound',
+                traffic_query=traffic_query
+            )
+
+            # Step 4: Also query outbound traffic (this app as source)
+            traffic_query_out = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                include_sources=[[app_filter, env_filter]],
+                exclude_sources=[],
+                include_destinations=[[]],
+                exclude_destinations=[],
+                include_services=[],
+                exclude_services=[],
+                policy_decisions=[],
+                exclude_workloads_from_ip_list_query=True,
+                max_results=MCP_BUG_MAX_RESULTS,
+                query_name='ringfence-outbound'
+            )
+
+            logger.debug("Querying outbound traffic flows...")
+            outbound_flows = pce.get_traffic_flows_async(
+                query_name='ringfence-outbound',
+                traffic_query=traffic_query_out
+            )
+
+            # Step 5: Analyze flows to find unique remote app+env pairs
+            remote_apps_inbound = {}  # key: (app_value, env_value) -> set of ports seen
+            remote_apps_outbound = {}
+
+            def extract_app_env(workload):
+                """Extract app and env label values from a workload's labels."""
+                if not workload or not workload.labels:
+                    return None, None
+                w_app = None
+                w_env = None
+                for lbl in workload.labels:
+                    info = label_href_map.get(lbl.href, {})
+                    if info.get("key") == "app":
+                        w_app = info.get("value")
+                    elif info.get("key") == "env":
+                        w_env = info.get("value")
+                return w_app, w_env
+
+            for flow in inbound_flows:
+                src_app, src_env = extract_app_env(flow.src.workload)
+                if src_app and src_env:
+                    # Skip intra-app traffic (same app+env)
+                    if src_app == app_name and src_env == env_name:
+                        continue
+                    key = (src_app, src_env)
+                    if key not in remote_apps_inbound:
+                        remote_apps_inbound[key] = set()
+                    if flow.service and flow.service.port:
+                        remote_apps_inbound[key].add((flow.service.port, flow.service.proto))
+
+            for flow in outbound_flows:
+                dst_app, dst_env = extract_app_env(flow.dst.workload)
+                if dst_app and dst_env:
+                    if dst_app == app_name and dst_env == env_name:
+                        continue
+                    key = (dst_app, dst_env)
+                    if key not in remote_apps_outbound:
+                        remote_apps_outbound[key] = set()
+                    if flow.service and flow.service.port:
+                        remote_apps_outbound[key].add((flow.service.port, flow.service.proto))
+
+            logger.debug(f"Discovered {len(remote_apps_inbound)} inbound remote apps, {len(remote_apps_outbound)} outbound remote apps")
+
+            # Step 6: Build the result summary
+            summary = {
+                "app": app_name,
+                "env": env_name,
+                "app_label_href": app_label.href,
+                "env_label_href": env_label.href,
+                "lookback_days": lookback_days,
+                "inbound_remote_apps": [
+                    {
+                        "app": k[0], "env": k[1],
+                        "observed_ports": [{"port": p[0], "proto": p[1]} for p in v]
+                    }
+                    for k, v in sorted(remote_apps_inbound.items())
+                ],
+                "outbound_remote_apps": [
+                    {
+                        "app": k[0], "env": k[1],
+                        "observed_ports": [{"port": p[0], "proto": p[1]} for p in v]
+                    }
+                    for k, v in sorted(remote_apps_outbound.items())
+                ],
+            }
+
+            if dry_run:
+                summary["dry_run"] = True
+                summary["message"] = "Dry run - no changes made. Review the discovered traffic and run again with dry_run=false to create the ringfence."
+                return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
+
+            # Step 7: Check if ruleset already exists - merge if so
+            existing = pce.rule_sets.get(params={"name": rs_name})
+            if existing:
+                ruleset = existing[0]
+                logger.debug(f"Merging into existing ruleset: {ruleset.href}")
+                summary["merged"] = True
+
+                # Collect existing extra-scope consumer app+env pairs to avoid duplicates
+                existing_remote_keys = set()
+                for rule in ruleset.rules:
+                    if rule.consumers:
+                        rule_app = None
+                        rule_env = None
+                        for c in rule.consumers:
+                            if hasattr(c, 'href'):
+                                info = label_href_map.get(c.href, {})
+                                if info.get("key") == "app":
+                                    rule_app = info.get("value")
+                                elif info.get("key") == "env":
+                                    rule_env = info.get("value")
+                        if rule_app and rule_env:
+                            existing_remote_keys.add((rule_app, rule_env))
+
+                # Remove already-covered remote apps from inbound list
+                for key in list(remote_apps_inbound.keys()):
+                    if key in existing_remote_keys:
+                        logger.debug(f"Skipping already-covered remote app: {key}")
+                        del remote_apps_inbound[key]
+            else:
+                # Step 8: Create the ruleset scoped to [app, env]
+                ruleset = RuleSet(name=rs_name, description=f"Ringfence for {app_name} ({env_name})")
+                scope_labels = LabelSet(labels=[app_label, env_label])
+                ruleset.scopes = [scope_labels]
+                ruleset = pce.rule_sets.create(ruleset)
+                logger.debug(f"Created ruleset: {ruleset.href}")
+                summary["merged"] = False
+
+            created_rules = []
+
+            # Step 9: Create intra-scope rule only for new rulesets
+            if not summary.get("merged"):
+                if all_services_href:
+                    intra_services = [{"href": all_services_href}]
+                else:
+                    intra_services = [ServicePort(port=-1, proto=6), ServicePort(port=-1, proto=17)]
+
+                intra_rule = Rule.build(
+                    providers=[AMS],
+                    consumers=[AMS],
+                    ingress_services=intra_services,
+                    unscoped_consumers=False
+                )
+                created_intra = pce.rules.create(intra_rule, parent=ruleset)
+                created_rules.append({
+                    "type": "intra-scope",
+                    "href": created_intra.href,
+                    "description": "All workloads within app can communicate on All Services",
+                    "consumers": "All Workloads (in scope)",
+                    "providers": "All Workloads (in scope)",
+                    "services": "All Services"
+                })
+
+            # Step 10: Create extra-scope rules for each inbound remote app
+            for (remote_app, remote_env), ports in sorted(remote_apps_inbound.items()):
+                # Find the remote app and env labels
+                remote_app_labels = pce.labels.get(params={"key": "app", "value": remote_app})
+                remote_env_labels = pce.labels.get(params={"key": "env", "value": remote_env})
+
+                if not remote_app_labels or not remote_env_labels:
+                    logger.warning(f"Could not find labels for remote app={remote_app}, env={remote_env}, skipping")
+                    continue
+
+                consumers = [remote_app_labels[0], remote_env_labels[0]]
+
+                if all_services_href:
+                    extra_services = [{"href": all_services_href}]
+                else:
+                    extra_services = [ServicePort(port=-1, proto=6), ServicePort(port=-1, proto=17)]
+
+                extra_rule = Rule.build(
+                    providers=[AMS],
+                    consumers=consumers,
+                    ingress_services=extra_services,
+                    unscoped_consumers=True
+                )
+                created_extra = pce.rules.create(extra_rule, parent=ruleset)
+                created_rules.append({
+                    "type": "extra-scope (inbound)",
+                    "href": created_extra.href,
+                    "description": f"Allow {remote_app} ({remote_env}) -> {app_name} ({env_name})",
+                    "consumers": f"app={remote_app}, env={remote_env}",
+                    "providers": "All Workloads (in scope)",
+                    "services": "All Services",
+                    "observed_ports": [{"port": p[0], "proto": p[1]} for p in ports]
+                })
+
+            summary["ruleset"] = {
+                "href": ruleset.href,
+                "name": rs_name,
+                "rules": created_rules
+            }
+            summary["message"] = f"Ringfence created with {len(created_rules)} rules ({1} intra-scope + {len(created_rules) - 1} extra-scope inbound)"
+
+            return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to create ringfence: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 

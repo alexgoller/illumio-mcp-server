@@ -63,6 +63,7 @@ class TestToolListing:
                     "get-services", "create-service", "update-service", "delete-service",
                     "get-traffic-flows", "get-traffic-flows-summary",
                     "get-events",
+                    "create-ringfence",
                 ])
                 assert len(tool_names) == len(expected), \
                     f"Tool count mismatch: got {len(tool_names)}, expected {len(expected)}. Extra: {set(tool_names) - set(expected)}, Missing: {set(expected) - set(tool_names)}"
@@ -922,3 +923,64 @@ class TestEnhancedReads:
         result = await run_tool("get-services", {"max_results": 3})
         data = parse_result(result)
         assert data.get("total_count", 0) <= 3
+
+
+# ---------------------------------------------------------------------------
+# Ringfence
+# ---------------------------------------------------------------------------
+
+class TestRingfence:
+    async def test_ringfence_dry_run(self):
+        """Test ringfence in dry_run mode - should analyze traffic without creating anything."""
+        # First find a valid app and env label to use
+        labels_result = await run_tool("get-labels", {"key": "app", "max_results": 1})
+        text = labels_result.content[0].text
+        assert "Labels:" in text
+        # Extract first app label value
+        import ast, re
+        match = re.match(r"Labels:\s*(\[.*\])", text, re.DOTALL)
+        if not match:
+            pytest.skip("No app labels found in PCE")
+        try:
+            labels = ast.literal_eval(match.group(1))
+        except (ValueError, SyntaxError):
+            pytest.skip("Could not parse labels response")
+        if not labels:
+            pytest.skip("No app labels found in PCE")
+        app_name = labels[0].get("value")
+
+        env_result = await run_tool("get-labels", {"key": "env", "max_results": 1})
+        text = env_result.content[0].text
+        match = re.match(r"Labels:\s*(\[.*\])", text, re.DOTALL)
+        if not match:
+            pytest.skip("No env labels found in PCE")
+        try:
+            env_labels = ast.literal_eval(match.group(1))
+        except (ValueError, SyntaxError):
+            pytest.skip("Could not parse env labels response")
+        if not env_labels:
+            pytest.skip("No env labels found in PCE")
+        env_name = env_labels[0].get("value")
+
+        # Run ringfence in dry_run mode
+        result = await run_tool("create-ringfence", {
+            "app_name": app_name,
+            "env_name": env_name,
+            "dry_run": True,
+            "lookback_days": 7
+        })
+        data = parse_result(result)
+        assert data.get("dry_run") is True
+        assert "app" in data
+        assert "env" in data
+        assert "inbound_remote_apps" in data
+        assert "message" in data
+
+    async def test_ringfence_missing_app_label(self):
+        """Test ringfence with nonexistent app label returns error."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "nonexistent_xyz_app_999",
+            "env_name": "Production",
+        })
+        data = parse_result(result)
+        assert "error" in data
