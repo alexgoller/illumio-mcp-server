@@ -976,6 +976,104 @@ class TestRingfence:
         assert "inbound_remote_apps" in data
         assert "message" in data
 
+    async def test_ringfence_dry_run_selective(self):
+        """Test ringfence dry_run with selective=true shows correct plan."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "dry_run": True,
+            "selective": True,
+            "lookback_days": 90
+        })
+        data = parse_result(result)
+        assert data.get("dry_run") is True
+        assert data.get("selective") is True
+        assert data.get("app") == "pos"
+        assert data.get("env") == "Staging"
+        assert "inbound_remote_apps" in data
+        assert "outbound_remote_apps" in data
+
+    async def test_ringfence_create_standard_pos_staging(self):
+        """Create a standard (non-selective) ringfence for app=pos, env=Staging.
+        Does NOT delete the ruleset so it can be manually inspected."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "lookback_days": 90,
+            "dry_run": False,
+            "selective": False
+        })
+        data = parse_result(result)
+        assert "error" not in data, f"Ringfence creation failed: {data.get('error')}"
+        assert "ruleset" in data
+        rs = data["ruleset"]
+        assert rs.get("href"), "Ruleset should have an href"
+        assert "RF-pos-Staging" in rs.get("name", "")
+
+        rules = rs.get("rules", [])
+        if not data.get("merged"):
+            # Fresh creation - should have intra-scope rule
+            assert len(rules) >= 1, "Expected at least 1 rule (intra-scope)"
+            intra = [r for r in rules if r.get("type") == "intra-scope"]
+            assert len(intra) == 1, "Expected exactly 1 intra-scope rule"
+        else:
+            # Merged - intra-scope already existed, only new extra-scope rules if any
+            pass
+
+        # All extra-scope rules should be allow rules
+        extra = [r for r in rules if "extra-scope" in r.get("type", "")]
+        for r in extra:
+            assert "allow" in r["type"].lower(), f"Extra-scope rule should be allow, got: {r['type']}"
+
+    async def test_ringfence_create_selective_pos_staging(self):
+        """Create a selective ringfence for app=pos, env=Staging.
+        Merges into the standard ruleset created above, adding a deny rule.
+        Does NOT delete so it can be manually inspected."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "lookback_days": 90,
+            "dry_run": False,
+            "selective": True
+        })
+        data = parse_result(result)
+        assert "error" not in data, f"Selective ringfence failed: {data.get('error')}"
+        assert data.get("selective") is True
+
+        rs = data.get("ruleset", {})
+        assert rs.get("href"), "Ruleset should have an href"
+        rules = rs.get("rules", [])
+
+        # If this is a fresh run, there should be a deny rule in created_rules.
+        # If merged and deny already existed, created_rules won't include it
+        # but has_deny_all_inbound should be True.
+        deny_rules = [r for r in rules if r.get("type", "").startswith("deny")]
+        if data.get("merged") and data.get("has_deny_all_inbound"):
+            # Deny rule already existed from a prior run - that's fine
+            assert len(deny_rules) == 0, "Should not duplicate deny rule on merge"
+        else:
+            assert len(deny_rules) >= 1, "Expected at least 1 deny-all-inbound rule"
+            assert "deny all inbound" in deny_rules[0].get("description", "").lower()
+
+    async def test_ringfence_merge_idempotent(self):
+        """Running ringfence again on same app should merge without duplicates."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "lookback_days": 90,
+            "dry_run": False,
+            "selective": True
+        })
+        data = parse_result(result)
+        assert "error" not in data, f"Merge failed: {data.get('error')}"
+        assert data.get("merged") is True
+
+        # Deny rule should already exist, so no new deny rule created
+        rs = data.get("ruleset", {})
+        rules = rs.get("rules", [])
+        deny_rules = [r for r in rules if r.get("type", "").startswith("deny")]
+        assert len(deny_rules) == 0, "Should not create duplicate deny rule on merge"
+
     async def test_ringfence_missing_app_label(self):
         """Test ringfence with nonexistent app label returns error."""
         result = await run_tool("create-ringfence", {

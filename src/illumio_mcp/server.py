@@ -2692,46 +2692,65 @@ async def handle_call_tool(
                 traffic_query=traffic_query_out
             )
 
-            # Step 5: Analyze flows to find unique remote app+env pairs
-            remote_apps_inbound = {}  # key: (app_value, env_value) -> set of ports seen
+            # Step 5: Convert flows to dataframes and group by app+env
+            inbound_df = to_dataframe(inbound_flows)
+            outbound_df = to_dataframe(outbound_flows)
+
+            remote_apps_inbound = {}  # key: (app_value, env_value) -> list of {port, proto, connections}
             remote_apps_outbound = {}
 
-            def extract_app_env(workload):
-                """Extract app and env label values from a workload's labels."""
-                if not workload or not workload.labels:
-                    return None, None
-                w_app = None
-                w_env = None
-                for lbl in workload.labels:
-                    info = label_href_map.get(lbl.href, {})
-                    if info.get("key") == "app":
-                        w_app = info.get("value")
-                    elif info.get("key") == "env":
-                        w_env = info.get("value")
-                return w_app, w_env
+            if not inbound_df.empty:
+                # Group inbound by source app+env to find unique remote apps connecting in
+                src_group_cols = []
+                if 'src_app' in inbound_df.columns:
+                    src_group_cols.append('src_app')
+                if 'src_env' in inbound_df.columns:
+                    src_group_cols.append('src_env')
+                if src_group_cols and 'port' in inbound_df.columns and 'proto' in inbound_df.columns:
+                    group_cols = src_group_cols + ['port', 'proto']
+                    group_cols = [c for c in group_cols if c in inbound_df.columns]
+                    inbound_grouped = inbound_df.groupby(group_cols)['num_connections'].sum().reset_index()
+                    for _, row in inbound_grouped.iterrows():
+                        src_app_val = row.get('src_app')
+                        src_env_val = row.get('src_env')
+                        if not src_app_val or not src_env_val:
+                            continue
+                        if src_app_val == app_name and src_env_val == env_name:
+                            continue  # Skip intra-app traffic
+                        key = (src_app_val, src_env_val)
+                        if key not in remote_apps_inbound:
+                            remote_apps_inbound[key] = []
+                        remote_apps_inbound[key].append({
+                            "port": int(row['port']) if 'port' in row else None,
+                            "proto": int(row['proto']) if 'proto' in row else None,
+                            "connections": int(row['num_connections'])
+                        })
 
-            for flow in inbound_flows:
-                src_app, src_env = extract_app_env(flow.src.workload)
-                if src_app and src_env:
-                    # Skip intra-app traffic (same app+env)
-                    if src_app == app_name and src_env == env_name:
-                        continue
-                    key = (src_app, src_env)
-                    if key not in remote_apps_inbound:
-                        remote_apps_inbound[key] = set()
-                    if flow.service and flow.service.port:
-                        remote_apps_inbound[key].add((flow.service.port, flow.service.proto))
-
-            for flow in outbound_flows:
-                dst_app, dst_env = extract_app_env(flow.dst.workload)
-                if dst_app and dst_env:
-                    if dst_app == app_name and dst_env == env_name:
-                        continue
-                    key = (dst_app, dst_env)
-                    if key not in remote_apps_outbound:
-                        remote_apps_outbound[key] = set()
-                    if flow.service and flow.service.port:
-                        remote_apps_outbound[key].add((flow.service.port, flow.service.proto))
+            if not outbound_df.empty:
+                dst_group_cols = []
+                if 'dst_app' in outbound_df.columns:
+                    dst_group_cols.append('dst_app')
+                if 'dst_env' in outbound_df.columns:
+                    dst_group_cols.append('dst_env')
+                if dst_group_cols and 'port' in outbound_df.columns and 'proto' in outbound_df.columns:
+                    group_cols = dst_group_cols + ['port', 'proto']
+                    group_cols = [c for c in group_cols if c in outbound_df.columns]
+                    outbound_grouped = outbound_df.groupby(group_cols)['num_connections'].sum().reset_index()
+                    for _, row in outbound_grouped.iterrows():
+                        dst_app_val = row.get('dst_app')
+                        dst_env_val = row.get('dst_env')
+                        if not dst_app_val or not dst_env_val:
+                            continue
+                        if dst_app_val == app_name and dst_env_val == env_name:
+                            continue
+                        key = (dst_app_val, dst_env_val)
+                        if key not in remote_apps_outbound:
+                            remote_apps_outbound[key] = []
+                        remote_apps_outbound[key].append({
+                            "port": int(row['port']) if 'port' in row else None,
+                            "proto": int(row['proto']) if 'proto' in row else None,
+                            "connections": int(row['num_connections'])
+                        })
 
             logger.debug(f"Discovered {len(remote_apps_inbound)} inbound remote apps, {len(remote_apps_outbound)} outbound remote apps")
 
@@ -2743,17 +2762,11 @@ async def handle_call_tool(
                 "env_label_href": env_label.href,
                 "lookback_days": lookback_days,
                 "inbound_remote_apps": [
-                    {
-                        "app": k[0], "env": k[1],
-                        "observed_ports": [{"port": p[0], "proto": p[1]} for p in v]
-                    }
+                    {"app": k[0], "env": k[1], "observed_ports": v}
                     for k, v in sorted(remote_apps_inbound.items())
                 ],
                 "outbound_remote_apps": [
-                    {
-                        "app": k[0], "env": k[1],
-                        "observed_ports": [{"port": p[0], "proto": p[1]} for p in v]
-                    }
+                    {"app": k[0], "env": k[1], "observed_ports": v}
                     for k, v in sorted(remote_apps_outbound.items())
                 ],
             }
@@ -2772,31 +2785,48 @@ async def handle_call_tool(
 
             # Step 7: Check if ruleset already exists - merge if so
             existing = pce.rule_sets.get(params={"name": rs_name})
+            has_intra_scope = False
+            has_deny_all_inbound = False
+            existing_remote_keys = set()
+
             if existing:
                 ruleset = existing[0]
                 logger.debug(f"Merging into existing ruleset: {ruleset.href}")
                 summary["merged"] = True
 
-                # Collect existing extra-scope consumer app+env pairs to avoid duplicates
-                existing_remote_keys = set()
-                has_deny_all_inbound = False
-
-                # Check allow rules
+                # Scan existing allow rules for duplicates
                 for rule in ruleset.rules:
+                    rule_app = None
+                    rule_env = None
+                    is_ams_consumers = False
+                    is_ams_providers = False
+                    is_unscoped = getattr(rule, 'unscoped_consumers', False)
+
                     if rule.consumers:
-                        rule_app = None
-                        rule_env = None
                         for c in rule.consumers:
-                            if hasattr(c, 'href'):
+                            if c == AMS or (hasattr(c, 'actors') and str(c) == 'ams'):
+                                is_ams_consumers = True
+                            elif hasattr(c, 'href'):
                                 info = label_href_map.get(c.href, {})
                                 if info.get("key") == "app":
                                     rule_app = info.get("value")
                                 elif info.get("key") == "env":
                                     rule_env = info.get("value")
-                        if rule_app and rule_env:
-                            existing_remote_keys.add((rule_app, rule_env))
 
-                # Also check deny/override deny rules
+                    if rule.providers:
+                        for p in rule.providers:
+                            if p == AMS or (hasattr(p, 'actors') and str(p) == 'ams'):
+                                is_ams_providers = True
+
+                    # Detect intra-scope rule: AMS->AMS, not unscoped
+                    if is_ams_consumers and is_ams_providers and not is_unscoped:
+                        has_intra_scope = True
+
+                    # Detect extra-scope rule by consumer app+env
+                    if rule_app and rule_env:
+                        existing_remote_keys.add((rule_app, rule_env))
+
+                # Scan existing deny rules
                 try:
                     rs_href = ruleset.href
                     if '/active/' in rs_href:
@@ -2804,25 +2834,12 @@ async def handle_call_tool(
                     resp = pce.get(f"{rs_href}/deny_rules")
                     existing_deny_rules = resp.json()
                     for dr in existing_deny_rules:
-                        if dr.get('override', False):
-                            # Override deny rule - extract consumer app+env
-                            dr_app = None
-                            dr_env = None
-                            for c in dr.get('consumers', []):
-                                lbl = c.get('label', {})
-                                if lbl.get('href'):
-                                    info = label_href_map.get(lbl['href'], {})
-                                    if info.get("key") == "app":
-                                        dr_app = info.get("value")
-                                    elif info.get("key") == "env":
-                                        dr_env = info.get("value")
-                            if dr_app and dr_env:
-                                existing_remote_keys.add((dr_app, dr_env))
-                        else:
+                        if not dr.get('override', False):
                             # Regular deny rule - check if it's a deny-all-inbound
-                            if dr.get('unscoped_consumers') and any(
-                                c.get('actors') == 'ams' for c in dr.get('consumers', [])
-                            ):
+                            is_unscoped = dr.get('unscoped_consumers', False)
+                            consumers_ams = any(c.get('actors') == 'ams' for c in dr.get('consumers', []))
+                            providers_ams = any(p.get('actors') == 'ams' for p in dr.get('providers', []))
+                            if is_unscoped and consumers_ams and providers_ams:
                                 has_deny_all_inbound = True
                 except Exception as de:
                     logger.debug(f"Could not fetch deny_rules for merge check: {de}")
@@ -2830,10 +2847,14 @@ async def handle_call_tool(
                 summary["has_deny_all_inbound"] = has_deny_all_inbound
 
                 # Remove already-covered remote apps from inbound list
+                skipped = []
                 for key in list(remote_apps_inbound.keys()):
                     if key in existing_remote_keys:
-                        logger.debug(f"Skipping already-covered remote app: {key}")
+                        logger.debug(f"Skipping already-covered remote app: app={key[0]}, env={key[1]}")
+                        skipped.append({"app": key[0], "env": key[1]})
                         del remote_apps_inbound[key]
+                if skipped:
+                    summary["skipped_existing_rules"] = skipped
             else:
                 # Step 8: Create the ruleset scoped to [app, env]
                 ruleset = RuleSet(name=rs_name, description=f"Ringfence for {app_name} ({env_name})")
@@ -2845,8 +2866,8 @@ async def handle_call_tool(
 
             created_rules = []
 
-            # Step 9: Create intra-scope rule only for new rulesets
-            if not summary.get("merged"):
+            # Step 9: Create intra-scope rule if it doesn't already exist
+            if not has_intra_scope:
                 if all_services_href:
                     intra_services = [{"href": all_services_href}]
                 else:
@@ -2935,7 +2956,7 @@ async def handle_call_tool(
                     "consumers": f"app={remote_app}, env={remote_env}",
                     "providers": "All Workloads (in scope)",
                     "services": "All Services",
-                    "observed_ports": [{"port": p[0], "proto": p[1]} for p in ports]
+                    "observed_ports": ports
                 })
 
             # Build summary message
