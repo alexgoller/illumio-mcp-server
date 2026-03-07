@@ -945,6 +945,16 @@ reducing risk without requiring per-port policies.""",
                         "type": "boolean",
                         "description": "If true, analyze traffic and report what would be created without actually creating anything (default: false)",
                         "default": False
+                    },
+                    "selective": {
+                        "type": "boolean",
+                        "description": "If true, adds a deny rule blocking all inbound traffic to the app. "
+                            "In selective enforcement mode the default action is allow-all, so without "
+                            "this deny rule the ringfence has no teeth. Allow rules for known remote apps "
+                            "are processed before the deny rule (rule order: override_deny > allow > deny > default), "
+                            "so known apps pass through and everything else hits the deny. "
+                            "This gets you to enforcement faster than full enforcement mode.",
+                        "default": False
                     }
                 },
                 "required": ["app_name", "env_name"]
@@ -2601,6 +2611,7 @@ async def handle_call_tool(
             env_name = arguments["env_name"]
             lookback_days = arguments.get("lookback_days", 30)
             dry_run = arguments.get("dry_run", False)
+            selective = arguments.get("selective", False)
             rs_name = arguments.get("ruleset_name", f"RF-{app_name}-{env_name}")
 
             # Step 1: Find app and env labels
@@ -2747,9 +2758,16 @@ async def handle_call_tool(
                 ],
             }
 
+            summary["selective"] = selective
+
             if dry_run:
                 summary["dry_run"] = True
-                summary["message"] = "Dry run - no changes made. Review the discovered traffic and run again with dry_run=false to create the ringfence."
+                if selective:
+                    summary["message"] = ("Dry run - no changes made. Selective mode: will create allow rules for known remote apps "
+                        "plus a deny rule blocking all other inbound traffic. Rule order: allow rules are processed before deny, "
+                        "so known apps pass through. Review and run again with dry_run=false.")
+                else:
+                    summary["message"] = "Dry run - no changes made. Review the discovered traffic and run again with dry_run=false to create the ringfence."
                 return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
 
             # Step 7: Check if ruleset already exists - merge if so
@@ -2761,6 +2779,9 @@ async def handle_call_tool(
 
                 # Collect existing extra-scope consumer app+env pairs to avoid duplicates
                 existing_remote_keys = set()
+                has_deny_all_inbound = False
+
+                # Check allow rules
                 for rule in ruleset.rules:
                     if rule.consumers:
                         rule_app = None
@@ -2774,6 +2795,39 @@ async def handle_call_tool(
                                     rule_env = info.get("value")
                         if rule_app and rule_env:
                             existing_remote_keys.add((rule_app, rule_env))
+
+                # Also check deny/override deny rules
+                try:
+                    rs_href = ruleset.href
+                    if '/active/' in rs_href:
+                        rs_href = rs_href.replace('/active/', '/draft/')
+                    resp = pce.get(f"{rs_href}/deny_rules")
+                    existing_deny_rules = resp.json()
+                    for dr in existing_deny_rules:
+                        if dr.get('override', False):
+                            # Override deny rule - extract consumer app+env
+                            dr_app = None
+                            dr_env = None
+                            for c in dr.get('consumers', []):
+                                lbl = c.get('label', {})
+                                if lbl.get('href'):
+                                    info = label_href_map.get(lbl['href'], {})
+                                    if info.get("key") == "app":
+                                        dr_app = info.get("value")
+                                    elif info.get("key") == "env":
+                                        dr_env = info.get("value")
+                            if dr_app and dr_env:
+                                existing_remote_keys.add((dr_app, dr_env))
+                        else:
+                            # Regular deny rule - check if it's a deny-all-inbound
+                            if dr.get('unscoped_consumers') and any(
+                                c.get('actors') == 'ams' for c in dr.get('consumers', [])
+                            ):
+                                has_deny_all_inbound = True
+                except Exception as de:
+                    logger.debug(f"Could not fetch deny_rules for merge check: {de}")
+
+                summary["has_deny_all_inbound"] = has_deny_all_inbound
 
                 # Remove already-covered remote apps from inbound list
                 for key in list(remote_apps_inbound.keys()):
@@ -2814,9 +2868,45 @@ async def handle_call_tool(
                     "services": "All Services"
                 })
 
-            # Step 10: Create extra-scope rules for each inbound remote app
+            # Step 10: For selective mode, create a deny rule blocking all inbound traffic
+            if selective and not summary.get("has_deny_all_inbound", False):
+                # Build raw deny rule: all inbound to this app is denied
+                if all_services_href:
+                    deny_services = [{"href": all_services_href}]
+                else:
+                    deny_services = [{"port": -1, "proto": 6}, {"port": -1, "proto": 17}]
+
+                deny_payload = {
+                    "enabled": True,
+                    "providers": [{"actors": "ams"}],
+                    "consumers": [{"actors": "ams"}],
+                    "ingress_services": deny_services,
+                    "unscoped_consumers": True,
+                    "override": False
+                }
+
+                ruleset_href = ruleset.href
+                if '/active/' in ruleset_href:
+                    ruleset_href = ruleset_href.replace('/active/', '/draft/')
+
+                resp = pce.post(f"{ruleset_href}/deny_rules", json=deny_payload)
+                deny_result = resp.json()
+                created_rules.append({
+                    "type": "deny (block all inbound)",
+                    "href": deny_result.get("href", ""),
+                    "description": f"Deny all inbound traffic to {app_name} ({env_name}) - selective enforcement",
+                    "consumers": "All Workloads (unscoped/external)",
+                    "providers": "All Workloads (in scope)",
+                    "services": "All Services"
+                })
+                logger.debug(f"Created deny rule for selective enforcement: {deny_result.get('href')}")
+
+            # Step 11: Create extra-scope allow rules for each inbound remote app
+            # In both standard and selective mode, known remote apps get allow rules.
+            # Rule processing order: override_deny > allow > deny > default.
+            # In selective mode the deny rule (step 10) catches unknown inbound,
+            # but allow rules for known apps are processed first (step 3 in rule order).
             for (remote_app, remote_env), ports in sorted(remote_apps_inbound.items()):
-                # Find the remote app and env labels
                 remote_app_labels = pce.labels.get(params={"key": "app", "value": remote_app})
                 remote_env_labels = pce.labels.get(params={"key": "env", "value": remote_env})
 
@@ -2839,7 +2929,7 @@ async def handle_call_tool(
                 )
                 created_extra = pce.rules.create(extra_rule, parent=ruleset)
                 created_rules.append({
-                    "type": "extra-scope (inbound)",
+                    "type": "extra-scope allow (inbound)",
                     "href": created_extra.href,
                     "description": f"Allow {remote_app} ({remote_env}) -> {app_name} ({env_name})",
                     "consumers": f"app={remote_app}, env={remote_env}",
@@ -2848,12 +2938,24 @@ async def handle_call_tool(
                     "observed_ports": [{"port": p[0], "proto": p[1]} for p in ports]
                 })
 
+            # Build summary message
+            if selective:
+                deny_count = sum(1 for r in created_rules if r["type"].startswith("deny"))
+                allow_count = sum(1 for r in created_rules if "allow" in r["type"])
+                summary["enforcement_mode"] = "selective"
+                summary["message"] = (f"Selective ringfence created with {len(created_rules)} rules: "
+                    f"{allow_count} allow (intra-scope + known remote apps), "
+                    f"{deny_count} deny-all-inbound. "
+                    f"In selective mode: allows are processed before deny, so known apps pass through "
+                    f"and everything else is blocked by the deny rule.")
+            else:
+                summary["message"] = f"Ringfence created with {len(created_rules)} rules ({1} intra-scope + {len(created_rules) - 1} extra-scope inbound)"
+
             summary["ruleset"] = {
                 "href": ruleset.href,
                 "name": rs_name,
                 "rules": created_rules
             }
-            summary["message"] = f"Ringfence created with {len(created_rules)} rules ({1} intra-scope + {len(created_rules) - 1} extra-scope inbound)"
 
             return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
 
