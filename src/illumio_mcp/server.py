@@ -198,40 +198,63 @@ async def handle_list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="get-workloads",
-            description="Get workloads from the PCE",
+            description="Get workloads from the PCE with optional filtering",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Filter workloads by name (optional)"},
+                    "name": {"type": "string", "description": "Filter by workload name (supports partial matches)"},
+                    "hostname": {"type": "string", "description": "Filter by hostname (supports partial matches)"},
+                    "ip_address": {"type": "string", "description": "Filter by IP address (supports partial matches)"},
+                    "description": {"type": "string", "description": "Filter by description (supports partial matches)"},
+                    "managed": {"type": "boolean", "description": "Filter managed (true) or unmanaged (false) workloads"},
+                    "online": {"type": "boolean", "description": "Filter online (true) or offline (false) workloads"},
+                    "enforcement_mode": {
+                        "type": "string",
+                        "enum": ["visibility_only", "full", "idle", "selective"],
+                        "description": "Filter by enforcement mode"
+                    },
+                    "labels": {"type": "string", "description": "JSON-encoded list of label URIs to filter by"},
+                    "max_results": {"type": "integer", "description": "Maximum number of workloads to return (default 10000)"},
                 },
-                "required": [],
             },
         ),
         types.Tool(
             name="update-workload",
-            description="Update a workload in the PCE",
+            description="Update a workload in the PCE. Identify by href (preferred) or name. Provide only fields you want to change.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
-                    "ip_addresses": {"type": "array", "items": {"type": "string"}},
-                    "labels": {"type": "array", "items":
-                               {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}
+                    "href": {"type": "string", "description": "Workload href (e.g., /orgs/1/workloads/xxxx). Preferred identifier."},
+                    "name": {"type": "string", "description": "Workload name to find (alternative to href). If updating, this finds the workload."},
+                    "new_name": {"type": "string", "description": "New name for the workload"},
+                    "description": {"type": "string", "description": "New description for the workload"},
+                    "hostname": {"type": "string", "description": "New hostname for the workload"},
+                    "enforcement_mode": {
+                        "type": "string",
+                        "enum": ["visibility_only", "full", "idle", "selective"],
+                        "description": "Enforcement mode to set"
+                    },
+                    "ip_addresses": {"type": "array", "items": {"type": "string"}, "description": "New IP addresses (replaces existing interfaces)"},
+                    "labels": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}},
+                        "description": "Labels to assign (replaces existing labels). Each item has 'key' and 'value'."
                     },
                 },
-                "required": ["name"],
             }
         ),
         types.Tool(
             name="get-labels",
-            description="Get all labels from PCE",
-            mimeType="application/json",
+            description="Get labels from the PCE with optional filtering",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
+                    "key": {"type": "string", "description": "Filter by label key/type (e.g., 'role', 'app', 'env', 'loc')"},
+                    "value": {"type": "string", "description": "Filter by label value (supports partial matches)"},
+                    "max_results": {"type": "integer", "description": "Maximum number of labels to return"},
+                    "include_deleted": {"type": "boolean", "description": "Include deleted labels"},
+                    "usage": {"type": "boolean", "description": "Include label usage flags"},
                 },
-                "required": [],
             }
         ),
         types.Tool(
@@ -275,11 +298,13 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="delete-workload",
-            description="Delete a workload from the PCE",
+            description="Delete a workload from the PCE. Identify by href (preferred) or name.",
             inputSchema={
                 "type": "object",
-                "properties": {"name": {"type": "string"}},
-                "required": ["name"]
+                "properties": {
+                    "href": {"type": "string", "description": "Workload href (e.g., /orgs/1/workloads/xxxx)"},
+                    "name": {"type": "string", "description": "Workload name (alternative to href)"},
+                },
             }
         ),
         types.Tool(
@@ -416,55 +441,39 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get-rulesets",
-            description="Get rulesets from the PCE",
+            description="Get rulesets from the PCE with optional filtering",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Filter rulesets by name (optional)"
-                    },
-                    "enabled": {
-                        "type": "boolean",
-                        "description": "Filter by enabled/disabled status (optional)"
-                    }
+                    "name": {"type": "string", "description": "Filter rulesets by name (supports partial matches)"},
+                    "description": {"type": "string", "description": "Filter rulesets by description (supports partial matches)"},
+                    "enabled": {"type": "boolean", "description": "Filter by enabled/disabled status"},
+                    "labels": {"type": "string", "description": "JSON-encoded list of label URIs to filter by scope"},
+                    "max_results": {"type": "integer", "description": "Maximum number of rulesets to return"},
                 }
             }
         ),
         types.Tool(
             name="get-iplists",
-            description="Get IP lists from the PCE",
+            description="Get IP lists from the PCE with optional filtering",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Filter IP lists by name (optional)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Filter by description (optional)"
-                    },
-                    "ip_ranges": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "Filter by IP ranges (optional)"
-                    }
+                    "name": {"type": "string", "description": "Filter IP lists by name (supports partial matches)"},
+                    "description": {"type": "string", "description": "Filter by description (supports partial matches)"},
+                    "fqdn": {"type": "string", "description": "Filter by FQDN (supports partial matches)"},
+                    "ip_address": {"type": "string", "description": "Filter by IP address (supports partial matches)"},
+                    "max_results": {"type": "integer", "description": "Maximum number of IP lists to return"},
                 }
             }
         ),
         types.Tool(
             name="get-events",
-            description="Get events from the PCE",
+            description="Get events from the PCE with optional filtering",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "event_type": {
-                        "type": "string",
-                        "description": "Filter by event type (e.g., 'system_task.expire_service_account_api_keys')"
-                    },
+                    "event_type": {"type": "string", "description": "Filter by event type (e.g., 'system_task.expire_service_account_api_keys')"},
                     "severity": {
                         "type": "string",
                         "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"],
@@ -475,11 +484,10 @@ async def handle_list_tools() -> list[types.Tool]:
                         "enum": ["success", "failure"],
                         "description": "Filter by event status"
                     },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of events to return",
-                        "default": 100
-                    }
+                    "created_by": {"type": "string", "description": "Filter by creator (user, agent, or system)"},
+                    "timestamp_gte": {"type": "string", "description": "Earliest event timestamp (RFC 3339 format)"},
+                    "timestamp_lte": {"type": "string", "description": "Latest event timestamp (RFC 3339 format)"},
+                    "max_results": {"type": "integer", "description": "Maximum number of events to return", "default": 100},
                 }
             }
         ),
@@ -529,6 +537,12 @@ async def handle_list_tools() -> list[types.Tool]:
                                     "type": "boolean",
                                     "description": "Whether to allow unscoped consumers (extra-scope rule)",
                                     "default": False
+                                },
+                                "rule_type": {
+                                    "type": "string",
+                                    "enum": ["allow", "deny", "override_deny"],
+                                    "description": "Type of rule: 'allow' (default), 'deny' to block traffic, or 'override_deny' to override a deny rule",
+                                    "default": "allow"
                                 }
                             },
                             "required": ["providers", "consumers", "ingress_services"]
@@ -539,32 +553,170 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="create-deny-rule",
+            description="Create a deny rule in an existing ruleset. Deny rules block specific traffic. They are created inside rulesets just like allow rules but with rule_type 'deny'. Override deny rules allow traffic that would otherwise be denied by a deny rule.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ruleset_href": {
+                        "type": "string",
+                        "description": "Href of the ruleset to add the deny rule to (e.g., /orgs/1/sec_policy/draft/rule_sets/123)"
+                    },
+                    "ruleset_name": {
+                        "type": "string",
+                        "description": "Name of the ruleset to add the deny rule to (alternative to ruleset_href)"
+                    },
+                    "providers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Array of provider (destination) references: 'ams' for all workloads, label hrefs, key=value pairs, or 'iplist:<name>'"
+                    },
+                    "consumers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Array of consumer (source) references: 'ams' for all workloads, label hrefs, key=value pairs, or 'iplist:<name>'"
+                    },
+                    "ingress_services": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "port": {"type": "integer"},
+                                "proto": {"type": "string"}
+                            },
+                            "required": ["port", "proto"]
+                        },
+                        "description": "Services to deny (e.g., [{'port': 3389, 'proto': 'tcp'}])"
+                    },
+                    "override_deny": {
+                        "type": "boolean",
+                        "description": "If true, creates an override deny rule (allows traffic that would be denied). If false (default), creates a deny rule.",
+                        "default": False
+                    },
+                    "unscoped_consumers": {
+                        "type": "boolean",
+                        "description": "Whether to allow unscoped consumers (extra-scope rule)",
+                        "default": False
+                    }
+                },
+                "required": ["providers", "consumers", "ingress_services"]
+            }
+        ),
+        types.Tool(
             name="get-services",
             description="Get services from the PCE with optional filtering",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Filter services by name"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Filter services by description"
-                    },
-                    "port": {
-                        "type": "integer",
-                        "description": "Filter services by port number"
-                    },
-                    "proto": {
-                        "type": "string",
-                        "description": "Filter services by protocol (e.g., tcp, udp)"
-                    },
-                    "process_name": {
-                        "type": "string",
-                        "description": "Filter services by process name"
-                    }
+                    "name": {"type": "string", "description": "Filter services by name (supports partial matches)"},
+                    "description": {"type": "string", "description": "Filter services by description (supports partial matches)"},
+                    "port": {"type": "integer", "description": "Filter services by port number"},
+                    "proto": {"type": "string", "description": "Filter services by protocol (e.g., tcp, udp)"},
+                    "process_name": {"type": "string", "description": "Filter services by process name"},
+                    "max_results": {"type": "integer", "description": "Maximum number of services to return"},
                 }
+            }
+        ),
+        types.Tool(
+            name="create-service",
+            description="Create a new service definition in the PCE",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name of the service"},
+                    "description": {"type": "string", "description": "Description of the service"},
+                    "service_ports": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "port": {"type": "integer", "description": "Port number (-1 for all ports)"},
+                                "to_port": {"type": "integer", "description": "End port for a port range (optional)"},
+                                "proto": {"type": "integer", "description": "Protocol number (6=TCP, 17=UDP, 1=ICMP)"}
+                            },
+                            "required": ["proto"]
+                        },
+                        "description": "Array of port/protocol definitions"
+                    },
+                },
+                "required": ["name", "service_ports"]
+            }
+        ),
+        types.Tool(
+            name="update-service",
+            description="Update an existing service in the PCE. Identify by href (preferred) or name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "href": {"type": "string", "description": "Service href (e.g., /orgs/1/sec_policy/draft/services/123)"},
+                    "name": {"type": "string", "description": "Service name to find (alternative to href)"},
+                    "new_name": {"type": "string", "description": "New name for the service"},
+                    "description": {"type": "string", "description": "New description"},
+                    "service_ports": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "port": {"type": "integer"},
+                                "to_port": {"type": "integer"},
+                                "proto": {"type": "integer"}
+                            },
+                            "required": ["proto"]
+                        },
+                        "description": "New port/protocol definitions (replaces existing)"
+                    },
+                },
+            }
+        ),
+        types.Tool(
+            name="delete-service",
+            description="Delete a service from the PCE. Identify by href (preferred) or name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "href": {"type": "string", "description": "Service href (e.g., /orgs/1/sec_policy/draft/services/123)"},
+                    "name": {"type": "string", "description": "Service name (alternative to href)"},
+                },
+            }
+        ),
+        types.Tool(
+            name="update-deny-rule",
+            description="Update an existing deny rule in a ruleset. Identify the rule by its href.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "href": {"type": "string", "description": "Deny rule href (e.g., /orgs/1/sec_policy/draft/rule_sets/123/deny_rules/456)"},
+                    "enabled": {"type": "boolean", "description": "Enable or disable the deny rule"},
+                    "providers": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Updated provider references: 'ams', label hrefs, key=value pairs, or 'iplist:<name>'"
+                    },
+                    "consumers": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Updated consumer references: 'ams', label hrefs, key=value pairs, or 'iplist:<name>'"
+                    },
+                    "ingress_services": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}},
+                            "required": ["port", "proto"]
+                        },
+                        "description": "Updated services"
+                    },
+                },
+                "required": ["href"]
+            }
+        ),
+        types.Tool(
+            name="delete-deny-rule",
+            description="Delete a deny rule from a ruleset by its href",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "href": {"type": "string", "description": "Deny rule href (e.g., /orgs/1/sec_policy/draft/rule_sets/123/deny_rules/456)"},
+                },
+                "required": ["href"]
             }
         ),
         types.Tool(
@@ -745,6 +897,20 @@ async def handle_list_tools() -> list[types.Tool]:
                 }
             }
         ),
+        types.Tool(
+            name="delete-ruleset",
+            description="Delete a ruleset from the PCE by its href",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "href": {
+                        "type": "string",
+                        "description": "Href of the ruleset to delete (e.g., /orgs/1/sec_policy/draft/rule_sets/123)"
+                    }
+                },
+                "required": ["href"]
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -762,17 +928,18 @@ async def handle_call_tool(
 
         logger.debug("Initializing PCE connection")
         try:
-            logger.debug(f"PCE connection details - Host: {PCE_HOST}, Port: {PCE_PORT}, Org: {PCE_ORG_ID}")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
-            logger.debug("Credentials set")
-            connection_status = pce.check_connection()
-            logger.debug(f"PCE connection status: {connection_status}")
-            
-            logger.debug("Fetching workloads from PCE")
-            params = {"include": "labels", "max_results": 10000}
-            if arguments and arguments.get('name'):
-                params['name'] = arguments['name']
+
+            params = {"include": "labels", "max_results": arguments.get('max_results', 10000)}
+            for param in ['name', 'hostname', 'ip_address', 'description', 'labels', 'enforcement_mode']:
+                if arguments.get(param):
+                    params[param] = arguments[param]
+            if 'managed' in arguments:
+                params['managed'] = arguments['managed']
+            if 'online' in arguments:
+                params['online'] = arguments['online']
+
             workloads = pce.workloads.get(params=params)
             logger.debug(f"Successfully retrieved {len(workloads)} workloads")
             return [types.TextContent(
@@ -851,17 +1018,30 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
-            resp = pce.get('/labels')
+
+            params = {}
+            if arguments.get('key'):
+                params['key'] = arguments['key']
+            if arguments.get('value'):
+                params['value'] = arguments['value']
+            if arguments.get('max_results'):
+                params['max_results'] = arguments['max_results']
+            if arguments.get('include_deleted'):
+                params['include_deleted'] = arguments['include_deleted']
+            if arguments.get('usage'):
+                params['usage'] = arguments['usage']
+
+            resp = pce.get('/labels', params=params)
             labels = resp.json()
             return [types.TextContent(
                 type="text",
-                text= f"Labels: {labels}"
+                text=f"Labels: {labels}"
             )]
         except Exception as e:
             error_msg = f"Failed in PCE operation: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(
-                type="json",
+                type="text",
                 text=f"Error: {error_msg}"
             )]
     elif name == "create-workload":
@@ -917,93 +1097,93 @@ async def handle_call_tool(
                 text=f"Error: {error_msg}"
             )]
     elif name == "update-workload":
-        logger.debug(f"Updating workload with name: {arguments['name']} and ip_addresses: {arguments['ip_addresses']}")
-        logger.debug(f"Labels: {arguments['labels']}")
+        logger.debug(f"UPDATE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
 
-            workload = pce.workloads.get(params = { "name": arguments['name'] })
-            if workload:
-                logger.debug(f"Workload found: {workload}")
+            # Find the workload by href or name
+            workload_obj = None
+            if arguments.get("href"):
+                workload_obj = pce.workloads.get_by_reference(arguments["href"])
+            elif arguments.get("name"):
+                workloads = pce.workloads.get(params={"name": arguments["name"]})
+                if workloads:
+                    workload_obj = workloads[0]
+
+            if not workload_obj:
+                return [types.TextContent(type="text", text=json.dumps({"error": "Workload not found"}))]
+
+            # Build update payload via raw API for flexibility
+            update_data = {}
+            if "new_name" in arguments:
+                update_data["name"] = arguments["new_name"]
+            if "description" in arguments:
+                update_data["description"] = arguments["description"]
+            if "hostname" in arguments:
+                update_data["hostname"] = arguments["hostname"]
+            if "enforcement_mode" in arguments:
+                update_data["enforcement_mode"] = arguments["enforcement_mode"]
+
+            # Handle IP addresses -> interfaces
+            if arguments.get("ip_addresses"):
                 interfaces = []
-                prefix = "eth"
-                if_count = 0
-                for ip in arguments['ip_addresses']:
-                    intf = Interface(name = f"{prefix}{if_count}", address = ip)
-                    interfaces.append(intf)
-                    if_count += 1
+                for i, ip in enumerate(arguments["ip_addresses"]):
+                    interfaces.append({"name": f"eth{i}", "address": ip})
+                update_data["interfaces"] = interfaces
 
+            # Handle labels
+            if "labels" in arguments:
                 workload_labels = []
-
-                for label in arguments['labels']:
-                    logger.debug(f"Label: {label}")
-                    # check if label already exists
-                    label_resp = pce.labels.get(params = { "key": label['key'], "value": label['value'] })
+                for label_spec in arguments["labels"]:
+                    label_resp = pce.labels.get(params={"key": label_spec["key"], "value": label_spec["value"]})
                     if label_resp:
-                        logger.debug(f"Label already exists: {label_resp}")
-                        workload_label = label_resp[0]  # Get the first matching label
+                        workload_labels.append({"href": label_resp[0].href})
                     else:
-                        logger.debug(f"Label does not exist, creating: {label}")
-                        new_label = Label(key=label['key'], value=label['value'])
-                        workload_label = pce.labels.create(new_label)
+                        new_label = Label(key=label_spec["key"], value=label_spec["value"])
+                        created = pce.labels.create(new_label)
+                        workload_labels.append({"href": created.href})
+                update_data["labels"] = workload_labels
 
-                    workload_labels.append(workload_label)
+            if not update_data:
+                return [types.TextContent(type="text", text=json.dumps({"error": "No update fields provided"}))]
 
-                logger.debug(f"Labels: {workload_labels}")
-                if interfaces and workload_labels:
-                    workload = pce.workloads.update(workload[0], interfaces=interfaces, labels=workload_labels)
-                elif workload_labels:
-                    workload = pce.workloads.update(workload[0], labels=workload_labels)
-                elif interfaces:
-                    workload = pce.workloads.update(workload[0], interfaces=interfaces)
-                else:
-                    return [types.TextContent(
-                        type="text",
-                        text="Workload unchanged: no labels or ip_addresses provided"
-                    )]
-                logger.debug(f"Workload update status: {workload}")
-                return [types.TextContent(
-                    type="text",
-                    text=f"Workload updated with status: {workload}"
-                )]
-            else:
-                logger.debug(f"Workload not found")
-                return [types.TextContent(
-                    type="text",
-                    text=f"Workload not found"
-                )]
+            pce.put(workload_obj.href, json=update_data)
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"message": f"Successfully updated workload {workload_obj.href}", "updated_fields": list(update_data.keys())}, indent=2)
+            )]
         except Exception as e:
             error_msg = f"Failed in PCE operation: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            return [types.TextContent(
-                type="text",
-                text=f"Error: {error_msg}"
-            )]
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
     elif name == "delete-workload":
-        logger.debug(f"Deleting workload with name: {arguments['name']}")
+        logger.debug(f"DELETE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
-            workload = pce.workloads.get(params = { "name": arguments['name'] })
-            if workload:
-                pce.workloads.delete(workload[0])
+
+            workload_obj = None
+            if arguments.get("href"):
+                workload_obj = pce.workloads.get_by_reference(arguments["href"])
+            elif arguments.get("name"):
+                workloads = pce.workloads.get(params={"name": arguments["name"]})
+                if workloads:
+                    workload_obj = workloads[0]
+
+            if workload_obj:
+                pce.workloads.delete(workload_obj)
                 return [types.TextContent(
                     type="text",
-                    text=f"Workload deleted successfully: {arguments['name']}"
+                    text=json.dumps({"message": f"Workload deleted successfully: {workload_obj.href}"})
                 )]
             else:
-                return [types.TextContent(
-                    type="text",
-                    text=f"Workload not found"
-                )]
+                return [types.TextContent(type="text", text=json.dumps({"error": "Workload not found"}))]
         except Exception as e:
             error_msg = f"Failed in PCE operation: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            return [types.TextContent(
-                type="text",
-                text=f"Error: {error_msg}"
-            )]
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
     elif name == "get-traffic-flows":
         logger.debug("=" * 80)
         logger.debug("GET TRAFFIC FLOWS CALLED")
@@ -1065,33 +1245,15 @@ async def handle_call_tool(
                 traffic_query=traffic_query
             )
             
-            # Convert the traffic flows to a serializable format
-            traffic_data = []
-            for flow in all_traffic:
-                try:
-                    flow_dict = {
-                        'src_ip': str(flow.src.ip) if flow.src and hasattr(flow.src, 'ip') else None,
-                        'dst_ip': str(flow.dst.ip) if flow.dst and hasattr(flow.dst, 'ip') else None,
-                        'proto': str(flow.service.proto) if flow.service and hasattr(flow.service, 'proto') else None,
-                        'port': int(flow.service.port) if flow.service and hasattr(flow.service, 'port') else None,
-                        'policy_decision': str(flow.policy_decision) if hasattr(flow, 'policy_decision') else None,
-                        'num_connections': int(flow.num_connections) if hasattr(flow, 'num_connections') else 0
-                    }
-                    # Add workload information if available
-                    if hasattr(flow.src, 'workload') and flow.src.workload:
-                        flow_dict['src_workload'] = str(flow.src.workload.name)
-                    if hasattr(flow.dst, 'workload') and flow.dst.workload:
-                        flow_dict['dst_workload'] = str(flow.dst.workload.name)
-                    
-                    traffic_data.append(flow_dict)
-                except Exception as e:
-                    logger.error(f"Error processing flow: {e}")
-                    continue
-
             df = to_dataframe(all_traffic)
 
-            # group dataframe by src_ip, dst_ip, proto, port, policy_decision tuples, aggregate num_connections
-            df = df.groupby(['src_ip', 'dst_ip', 'proto', 'port', 'policy_decision']).agg({'num_connections': 'sum'}).reset_index()
+            # Group by columns that exist, always including IP list names
+            group_cols = ['src_ip', 'dst_ip', 'proto', 'port', 'policy_decision']
+            for col in ['src_ip_lists', 'dst_ip_lists', 'src_hostname', 'dst_hostname']:
+                if col in df.columns:
+                    group_cols.append(col)
+            group_cols = [c for c in group_cols if c in df.columns]
+            df = df.groupby(group_cols).agg({'num_connections': 'sum'}).reset_index()
 
             # limit dataframe json output to less than 1048576
             MAX_ROWS = 1000
@@ -1201,23 +1363,19 @@ async def handle_call_tool(
                 text=json.dumps({"error": error_msg})
             )]
     elif name == "get-rulesets":
-        logger.debug("=" * 80)
-        logger.debug("GET RULESETS CALLED")
-        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
-        logger.debug(f"Name filter: {arguments.get('name')}")
-        logger.debug(f"Enabled filter: {arguments.get('enabled')}")
-        logger.debug("=" * 80)
-
+        logger.debug(f"GET RULESETS CALLED with arguments: {json.dumps(arguments, indent=2)}")
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
 
-            # Prepare filter parameters
             params = {}
-            if arguments.get('name'):
-                params['name'] = arguments['name']
-            if arguments.get('enabled') is not None:
+            for param in ['name', 'description', 'labels']:
+                if arguments.get(param):
+                    params[param] = arguments[param]
+            if 'enabled' in arguments and arguments['enabled'] is not None:
                 params['enabled'] = arguments['enabled']
+            if arguments.get('max_results'):
+                params['max_results'] = arguments['max_results']
 
             rulesets = pce.rule_sets.get(params=params) if params else pce.rule_sets.get_all()
             
@@ -1227,6 +1385,7 @@ async def handle_call_tool(
                 rules = []
                 for rule in ruleset.rules:
                     rule_dict = {
+                        'rule_type': 'allow',
                         'enabled': rule.enabled,
                         'description': rule.description,
                         'resolve_labels_as': str(rule.resolve_labels_as) if rule.resolve_labels_as else None,
@@ -1235,6 +1394,26 @@ async def handle_call_tool(
                         'ingress_services': [str(service) for service in rule.ingress_services] if rule.ingress_services else []
                     }
                     rules.append(rule_dict)
+
+                # Fetch deny rules via raw API (override flag distinguishes override deny rules)
+                try:
+                    resp = pce.get(f"{ruleset.href}/deny_rules")
+                    deny_rules = resp.json()
+                    if deny_rules:
+                        for dr in deny_rules:
+                            is_override = dr.get('override', False)
+                            rule_dict = {
+                                'rule_type': 'override_deny' if is_override else 'deny',
+                                'href': dr.get('href'),
+                                'enabled': dr.get('enabled'),
+                                'description': dr.get('description'),
+                                'consumers': [str(c) for c in dr.get('consumers', [])],
+                                'providers': [str(p) for p in dr.get('providers', [])],
+                                'ingress_services': [str(s) for s in dr.get('ingress_services', [])]
+                            }
+                            rules.append(rule_dict)
+                except Exception as de:
+                    logger.debug(f"Could not fetch deny_rules for {ruleset.href}: {de}")
 
                 ruleset_dict = {
                     'href': ruleset.href,
@@ -1262,30 +1441,18 @@ async def handle_call_tool(
                 text=json.dumps({"error": error_msg})
             )]
     elif name == "get-iplists":
-        logger.debug("=" * 80)
-        logger.debug("GET IP LISTS CALLED")
-        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
-        logger.debug(f"Name filter: {arguments.get('name')}")
-        logger.debug(f"Description filter: {arguments.get('description')}")
-        logger.debug(f"IP ranges filter: {arguments.get('ip_ranges', [])}")
-        logger.debug("=" * 80)
-
+        logger.debug(f"GET IP LISTS CALLED with arguments: {json.dumps(arguments, indent=2)}")
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
 
-            # Prepare filter parameters
-            params = {}
-            if arguments.get('name'):
-                params['name'] = arguments['name']
-            if arguments.get('description'):
-                params['description'] = arguments['description']
-
-            params['max_results'] = 10000
+            params = {"max_results": arguments.get("max_results", 10000)}
+            for param in ['name', 'description', 'fqdn', 'ip_address']:
+                if arguments.get(param):
+                    params[param] = arguments[param]
 
             ip_lists = pce.ip_lists.get(params=params)
-            
-            # Convert IP lists to serializable format
+
             iplist_data = []
             for iplist in ip_lists:
                 iplist_dict = {
@@ -1296,36 +1463,17 @@ async def handle_call_tool(
                     'fqdns': iplist.fqdns if hasattr(iplist, 'fqdns') else [],
                     'created_at': str(iplist.created_at) if hasattr(iplist, 'created_at') else None,
                     'updated_at': str(iplist.updated_at) if hasattr(iplist, 'updated_at') else None,
-                    'deleted_at': str(iplist.deleted_at) if hasattr(iplist, 'deleted_at') else None,
-                    'created_by': str(iplist.created_by) if hasattr(iplist, 'created_by') else None,
-                    'updated_by': str(iplist.updated_by) if hasattr(iplist, 'updated_by') else None,
-                    'deleted_by': str(iplist.deleted_by) if hasattr(iplist, 'deleted_by') else None
                 }
-                
-                # Apply IP ranges filter if provided
-                if arguments.get('ip_ranges'):
-                    if any(ip_range in iplist_dict['ip_ranges'] for ip_range in arguments['ip_ranges']):
-                        iplist_data.append(iplist_dict)
-                else:
-                    iplist_data.append(iplist_dict)
-
-            logger.debug(f"Found {len(iplist_data)} IP lists")
+                iplist_data.append(iplist_dict)
 
             return [types.TextContent(
                 type="text",
-                text=json.dumps({
-                    "ip_lists": iplist_data,
-                    "total_count": len(iplist_data)
-                }, indent=2)
+                text=json.dumps({"ip_lists": iplist_data, "total_count": len(iplist_data)}, indent=2)
             )]
-
         except Exception as e:
             error_msg = f"Failed to get IP lists: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            return [types.TextContent(
-                type="text",
-                text=json.dumps({"error": error_msg})
-            )]
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
     elif name == "get-events":
         logger.debug("=" * 80)
         logger.debug("GET EVENTS CALLED")
@@ -1336,16 +1484,14 @@ async def handle_call_tool(
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
 
-            # Prepare filter parameters
             params = {}
-            if arguments.get('event_type'):
-                params['event_type'] = arguments['event_type']
-            if arguments.get('severity'):
-                params['severity'] = arguments['severity']
-            if arguments.get('status'):
-                params['status'] = arguments['status']
-            if arguments.get('max_results'):
-                params['max_results'] = arguments['max_results']
+            for param in ['event_type', 'severity', 'status', 'max_results', 'created_by']:
+                if arguments.get(param):
+                    params[param] = arguments[param]
+            if arguments.get('timestamp_gte'):
+                params['timestamp[gte]'] = arguments['timestamp_gte']
+            if arguments.get('timestamp_lte'):
+                params['timestamp[lte]'] = arguments['timestamp_lte']
 
             events = pce.events.get(params=params)
 
@@ -1530,22 +1676,75 @@ async def handle_call_tool(
                         )
                         ingress_services.append(service_port)
                     
-                    # Build and create the rule
-                    rule = Rule.build(
-                        providers=providers,
-                        consumers=consumers,
-                        ingress_services=ingress_services,
-                        unscoped_consumers=rule_def.get("unscoped_consumers", False)
-                    )
-                    
-                    created_rule = pce.rules.create(rule, parent=ruleset)
-                    created_rules.append({
-                        "href": created_rule.href,
-                        "providers": [str(p) for p in providers],
-                        "consumers": [str(c) for c in consumers],
-                        "services": [f"{s.port}/{s.proto}" for s in ingress_services],
-                        "unscoped_consumers": rule_def.get("unscoped_consumers", False)
-                    })
+                    # Determine rule type
+                    rule_type = rule_def.get("rule_type", "allow")
+
+                    if rule_type in ("deny", "override_deny"):
+                        # Deny/override deny rules use raw API since SDK doesn't support rule_type
+                        proto_map = {"tcp": 6, "udp": 17, "icmp": 1}
+                        raw_providers = []
+                        for p in providers:
+                            if p == AMS:
+                                raw_providers.append({"actors": "ams"})
+                            elif hasattr(p, 'href') and hasattr(p, 'key'):
+                                raw_providers.append({"label": {"href": p.href}})
+                            elif hasattr(p, 'href'):
+                                raw_providers.append({"ip_list": {"href": p.href}})
+                        raw_consumers = []
+                        for c in consumers:
+                            if c == AMS:
+                                raw_consumers.append({"actors": "ams"})
+                            elif hasattr(c, 'href') and hasattr(c, 'key'):
+                                raw_consumers.append({"label": {"href": c.href}})
+                            elif hasattr(c, 'href'):
+                                raw_consumers.append({"ip_list": {"href": c.href}})
+                        raw_services = []
+                        for svc in ingress_services:
+                            proto_val = svc.proto
+                            if isinstance(proto_val, str):
+                                proto_val = proto_map.get(proto_val.lower(), proto_val)
+                            raw_services.append({"port": svc.port, "proto": proto_val})
+
+                        rule_payload = {
+                            "enabled": True,
+                            "providers": raw_providers,
+                            "consumers": raw_consumers,
+                            "ingress_services": raw_services,
+                            "unscoped_consumers": rule_def.get("unscoped_consumers", False),
+                            "override": rule_type == "override_deny"
+                        }
+
+                        endpoint = f"{ruleset.href}/deny_rules"
+
+                        logger.debug(f"Creating {rule_type} rule at: {endpoint}")
+                        resp = pce.post(endpoint, json=rule_payload)
+                        result = resp.json()
+                        created_rules.append({
+                            "href": result.get("href", ""),
+                            "rule_type": rule_type,
+                            "providers": [str(p) for p in providers],
+                            "consumers": [str(c) for c in consumers],
+                            "services": [f"{s.port}/{s.proto}" for s in ingress_services],
+                            "unscoped_consumers": rule_def.get("unscoped_consumers", False)
+                        })
+                    else:
+                        # Standard allow rule using SDK
+                        rule = Rule.build(
+                            providers=providers,
+                            consumers=consumers,
+                            ingress_services=ingress_services,
+                            unscoped_consumers=rule_def.get("unscoped_consumers", False)
+                        )
+
+                        created_rule = pce.rules.create(rule, parent=ruleset)
+                        created_rules.append({
+                            "href": created_rule.href,
+                            "rule_type": "allow",
+                            "providers": [str(p) for p in providers],
+                            "consumers": [str(c) for c in consumers],
+                            "services": [f"{s.port}/{s.proto}" for s in ingress_services],
+                            "unscoped_consumers": rule_def.get("unscoped_consumers", False)
+                        })
             
             # Update the response to include rules
             return [types.TextContent(
@@ -1578,18 +1777,10 @@ async def handle_call_tool(
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
 
-            # Prepare filter parameters
             params = {}
-            if arguments.get('name'):
-                params['name'] = arguments['name']
-            if arguments.get('description'):
-                params['description'] = arguments['description']
-            if arguments.get('port'):
-                params['port'] = arguments['port']
-            if arguments.get('proto'):
-                params['proto'] = arguments['proto']
-            if arguments.get('process_name'):
-                params['process_name'] = arguments['process_name']
+            for param in ['name', 'description', 'port', 'proto', 'process_name', 'max_results']:
+                if arguments.get(param):
+                    params[param] = arguments[param]
             
             logger.debug(f"Querying services with params: {json.dumps(params, indent=2)}")
             services = pce.services.get(params=params)
@@ -2041,8 +2232,11 @@ async def handle_call_tool(
 
             # Update the ruleset
             logger.debug(f"Updating ruleset with data: {update_data}")
-            updated_ruleset = pce.rule_sets.update(ruleset.href, update_data)
-            
+            pce.rule_sets.update(ruleset.href, update_data)
+
+            # Re-fetch the ruleset to get updated state
+            updated_ruleset = pce.rule_sets.get_by_reference(ruleset.href)
+
             # Format response
             response_data = {
                 "href": updated_ruleset.href,
@@ -2131,6 +2325,332 @@ async def handle_call_tool(
                 text=json.dumps({"error": error_msg}, indent=2)
             )]
 
+    elif name == "create-deny-rule":
+        logger.debug("=" * 80)
+        logger.debug("CREATE DENY RULE CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            # Build label maps
+            label_href_map = {}
+            value_href_map = {}
+            for l in pce.labels.get(params={'max_results': 10000}):
+                label_href_map[l.href] = {"key": l.key, "value": l.value}
+                value_href_map["{}={}".format(l.key, l.value)] = l.href
+
+            # Find the ruleset
+            ruleset_href = None
+            if arguments.get("ruleset_href"):
+                ruleset_href = arguments["ruleset_href"]
+                # Ensure it's a draft href
+                if '/active/' in ruleset_href:
+                    ruleset_href = ruleset_href.replace('/active/', '/draft/')
+            elif arguments.get("ruleset_name"):
+                rulesets = pce.rule_sets.get(params={"name": arguments["ruleset_name"]})
+                if not rulesets:
+                    return [types.TextContent(
+                        type="text",
+                        text=json.dumps({"error": f"Ruleset '{arguments['ruleset_name']}' not found"}, indent=2)
+                    )]
+                ruleset_href = rulesets[0].href
+                if '/active/' in ruleset_href:
+                    ruleset_href = ruleset_href.replace('/active/', '/draft/')
+            else:
+                return [types.TextContent(
+                    type="text",
+                    text=json.dumps({"error": "Must provide either 'ruleset_href' or 'ruleset_name'"}, indent=2)
+                )]
+
+            is_override = arguments.get("override_deny", False)
+            rule_type = "override_deny" if is_override else "deny"
+
+            # Build providers
+            providers = []
+            for provider in arguments["providers"]:
+                if provider == "ams":
+                    providers.append({"actors": "ams"})
+                elif provider.startswith("iplist:"):
+                    ip_list_name = provider.split(":", 1)[1]
+                    ip_lists = pce.ip_lists.get(params={"name": ip_list_name})
+                    if ip_lists:
+                        providers.append({"ip_list": {"href": ip_lists[0].href}})
+                    else:
+                        return [types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"IP list not found: {ip_list_name}"})
+                        )]
+                elif provider in value_href_map:
+                    providers.append({"label": {"href": value_href_map[provider]}})
+                else:
+                    providers.append({"label": {"href": provider}})
+
+            # Build consumers
+            consumers = []
+            for consumer in arguments["consumers"]:
+                if consumer == "ams":
+                    consumers.append({"actors": "ams"})
+                elif consumer.startswith("iplist:"):
+                    ip_list_name = consumer.split(":", 1)[1]
+                    ip_lists = pce.ip_lists.get(params={"name": ip_list_name})
+                    if ip_lists:
+                        consumers.append({"ip_list": {"href": ip_lists[0].href}})
+                    else:
+                        return [types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"IP list not found: {ip_list_name}"})
+                        )]
+                elif consumer in value_href_map:
+                    consumers.append({"label": {"href": value_href_map[consumer]}})
+                else:
+                    consumers.append({"label": {"href": consumer}})
+
+            # Build ingress services
+            proto_map = {"tcp": 6, "udp": 17, "icmp": 1}
+            ingress_services = []
+            for svc in arguments["ingress_services"]:
+                proto_val = svc["proto"]
+                if isinstance(proto_val, str):
+                    proto_val = proto_map.get(proto_val.lower(), proto_val)
+                ingress_services.append({"port": svc["port"], "proto": proto_val})
+
+            # Build the rule payload
+            rule_payload = {
+                "enabled": True,
+                "providers": providers,
+                "consumers": consumers,
+                "ingress_services": ingress_services,
+                "unscoped_consumers": arguments.get("unscoped_consumers", False),
+                "override": rule_type == "override_deny"
+            }
+
+            endpoint = f"{ruleset_href}/deny_rules"
+
+            logger.debug(f"Creating {rule_type} rule at endpoint: {endpoint}")
+            logger.debug(f"Rule payload: {json.dumps(rule_payload, indent=2)}")
+
+            resp = pce.post(endpoint, json=rule_payload)
+            result = resp.json()
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({
+                    "message": f"Successfully created {rule_type} rule",
+                    "rule": result
+                }, indent=2)
+            )]
+
+        except Exception as e:
+            error_msg = f"Failed to create deny rule: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"error": error_msg}, indent=2)
+            )]
+
+    elif name == "update-deny-rule":
+        logger.debug(f"UPDATE DENY RULE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            href = arguments["href"]
+            if '/active/' in href:
+                href = href.replace('/active/', '/draft/')
+
+            update_data = {}
+            if "enabled" in arguments:
+                update_data["enabled"] = arguments["enabled"]
+
+            # Build label maps if providers/consumers use key=value
+            if arguments.get("providers") or arguments.get("consumers"):
+                label_href_map = {}
+                value_href_map = {}
+                for l in pce.labels.get(params={'max_results': 10000}):
+                    label_href_map[l.href] = {"key": l.key, "value": l.value}
+                    value_href_map[f"{l.key}={l.value}"] = l.href
+
+            if arguments.get("providers"):
+                raw_providers = []
+                for p in arguments["providers"]:
+                    if p == "ams":
+                        raw_providers.append({"actors": "ams"})
+                    elif p.startswith("iplist:"):
+                        ip_lists = pce.ip_lists.get(params={"name": p.split(":", 1)[1]})
+                        if ip_lists:
+                            raw_providers.append({"ip_list": {"href": ip_lists[0].href}})
+                    elif p in value_href_map:
+                        raw_providers.append({"label": {"href": value_href_map[p]}})
+                    else:
+                        raw_providers.append({"label": {"href": p}})
+                update_data["providers"] = raw_providers
+
+            if arguments.get("consumers"):
+                raw_consumers = []
+                for c in arguments["consumers"]:
+                    if c == "ams":
+                        raw_consumers.append({"actors": "ams"})
+                    elif c.startswith("iplist:"):
+                        ip_lists = pce.ip_lists.get(params={"name": c.split(":", 1)[1]})
+                        if ip_lists:
+                            raw_consumers.append({"ip_list": {"href": ip_lists[0].href}})
+                    elif c in value_href_map:
+                        raw_consumers.append({"label": {"href": value_href_map[c]}})
+                    else:
+                        raw_consumers.append({"label": {"href": c}})
+                update_data["consumers"] = raw_consumers
+
+            if arguments.get("ingress_services"):
+                proto_map = {"tcp": 6, "udp": 17, "icmp": 1}
+                raw_services = []
+                for svc in arguments["ingress_services"]:
+                    proto_val = svc["proto"]
+                    if isinstance(proto_val, str):
+                        proto_val = proto_map.get(proto_val.lower(), proto_val)
+                    raw_services.append({"port": svc["port"], "proto": proto_val})
+                update_data["ingress_services"] = raw_services
+
+            if not update_data:
+                return [types.TextContent(type="text", text=json.dumps({"error": "No update fields provided"}))]
+
+            pce.put(href, json=update_data)
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"message": f"Successfully updated deny rule {href}", "updated_fields": list(update_data.keys())}, indent=2)
+            )]
+        except Exception as e:
+            error_msg = f"Failed to update deny rule: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "delete-deny-rule":
+        logger.debug(f"DELETE DENY RULE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            href = arguments["href"]
+            if '/active/' in href:
+                href = href.replace('/active/', '/draft/')
+
+            pce.delete(href)
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"message": f"Successfully deleted deny rule {href}"}, indent=2)
+            )]
+        except Exception as e:
+            error_msg = f"Failed to delete deny rule: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "create-service":
+        logger.debug(f"CREATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            payload = {
+                "name": arguments["name"],
+                "service_ports": arguments["service_ports"],
+            }
+            if arguments.get("description"):
+                payload["description"] = arguments["description"]
+
+            resp = pce.post("/sec_policy/draft/services", json=payload)
+            result = resp.json()
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"message": "Successfully created service", "service": result}, indent=2)
+            )]
+        except Exception as e:
+            error_msg = f"Failed to create service: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "update-service":
+        logger.debug(f"UPDATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            # Find service by href or name
+            service_href = None
+            if arguments.get("href"):
+                service_href = arguments["href"]
+            elif arguments.get("name"):
+                services = pce.services.get(params={"name": arguments["name"]})
+                if services:
+                    service_href = services[0].href
+                else:
+                    return [types.TextContent(type="text", text=json.dumps({"error": f"Service '{arguments['name']}' not found"}))]
+
+            if not service_href:
+                return [types.TextContent(type="text", text=json.dumps({"error": "Must provide either 'href' or 'name'"}))]
+
+            if '/active/' in service_href:
+                service_href = service_href.replace('/active/', '/draft/')
+
+            update_data = {}
+            if "new_name" in arguments:
+                update_data["name"] = arguments["new_name"]
+            if "description" in arguments:
+                update_data["description"] = arguments["description"]
+            if "service_ports" in arguments:
+                update_data["service_ports"] = arguments["service_ports"]
+
+            if not update_data:
+                return [types.TextContent(type="text", text=json.dumps({"error": "No update fields provided"}))]
+
+            pce.put(service_href, json=update_data)
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"message": f"Successfully updated service {service_href}", "updated_fields": list(update_data.keys())}, indent=2)
+            )]
+        except Exception as e:
+            error_msg = f"Failed to update service: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "delete-service":
+        logger.debug(f"DELETE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            service_href = None
+            if arguments.get("href"):
+                service_href = arguments["href"]
+            elif arguments.get("name"):
+                services = pce.services.get(params={"name": arguments["name"]})
+                if services:
+                    service_href = services[0].href
+                else:
+                    return [types.TextContent(type="text", text=json.dumps({"error": f"Service '{arguments['name']}' not found"}))]
+
+            if not service_href:
+                return [types.TextContent(type="text", text=json.dumps({"error": "Must provide either 'href' or 'name'"}))]
+
+            if '/active/' in service_href:
+                service_href = service_href.replace('/active/', '/draft/')
+
+            pce.delete(service_href)
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"message": f"Successfully deleted service {service_href}"}, indent=2)
+            )]
+        except Exception as e:
+            error_msg = f"Failed to delete service: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
 def to_dataframe(flows):
     pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
     pce.set_credentials(API_KEY, API_SECRET)
@@ -2150,21 +2670,34 @@ def to_dataframe(flows):
         try:
             f = {
                 'src_ip': flow.src.ip,
-                    'src_hostname': flow.src.workload.name if flow.src.workload is not None else None,
-                    'dst_ip': flow.dst.ip,
-                    'dst_hostname': flow.dst.workload.name if flow.dst.workload is not None else None,
-                    'proto': flow.service.proto,
-                    'port': flow.service.port,
-                    'process_name': flow.service.process_name,
-                    'service_name': flow.service.service_name,
-                    'policy_decision': flow.policy_decision,
-                    'flow_direction': flow.flow_direction,
-                    'num_connections': flow.num_connections,
-                    'first_detected': flow.timestamp_range.first_detected,
-                    'last_detected': flow.timestamp_range.last_detected,
+                'src_hostname': flow.src.workload.name if flow.src.workload is not None else None,
+                'dst_ip': flow.dst.ip,
+                'dst_hostname': flow.dst.workload.name if flow.dst.workload is not None else None,
+                'proto': flow.service.proto,
+                'port': flow.service.port,
+                'process_name': flow.service.process_name,
+                'service_name': flow.service.service_name,
+                'policy_decision': flow.policy_decision,
+                'flow_direction': flow.flow_direction,
+                'num_connections': flow.num_connections,
+                'first_detected': flow.timestamp_range.first_detected,
+                'last_detected': flow.timestamp_range.last_detected,
             }
 
-            # Add src and dst app and env labels
+            # Add IP list names for src and dst
+            if flow.src.ip_lists:
+                ip_list_names = [ipl.name for ipl in flow.src.ip_lists if hasattr(ipl, 'name') and ipl.name]
+                f['src_ip_lists'] = ', '.join(ip_list_names) if ip_list_names else None
+            else:
+                f['src_ip_lists'] = None
+
+            if flow.dst.ip_lists:
+                ip_list_names = [ipl.name for ipl in flow.dst.ip_lists if hasattr(ipl, 'name') and ipl.name]
+                f['dst_ip_lists'] = ', '.join(ip_list_names) if ip_list_names else None
+            else:
+                f['dst_ip_lists'] = None
+
+            # Add src and dst labels from workloads
             if flow.src.workload:
                 for l in flow.src.workload.labels:
                     if l.href in label_href_map:
@@ -2190,12 +2723,16 @@ def to_dataframe(flows):
 def summarize_traffic(df):
     logger.debug(f"Summarizing traffic with dataframe: {df}")
     
-    # Define all possible group columns
-    potential_columns = ['src_app', 'src_env', 'dst_app', 'dst_env', 'proto', 'port']
-    
+    # Define all possible group columns, including IP list columns
+    potential_columns = [
+        'src_app', 'src_env', 'src_ip_lists',
+        'dst_app', 'dst_env', 'dst_ip_lists',
+        'proto', 'port'
+    ]
+
     # Filter to only use columns that exist in the DataFrame
     group_columns = [col for col in potential_columns if col in df.columns]
-    
+
     if not group_columns:
         logger.warning("No grouping columns found in DataFrame")
         return "No traffic data available for summarization"
@@ -2204,6 +2741,11 @@ def summarize_traffic(df):
         logger.warning("Empty DataFrame received")
         return "No traffic data available for summarization"
 
+    # Fill NaN in IP list columns so groupby works properly
+    for col in ['src_ip_lists', 'dst_ip_lists']:
+        if col in df.columns:
+            df[col] = df[col].fillna('')
+
     logger.debug(f"Using group columns: {group_columns}")
     logger.debug(f"DataFrame shape before grouping: {df.shape}")
     logger.debug(f"DataFrame columns: {df.columns.tolist()}")
@@ -2211,7 +2753,7 @@ def summarize_traffic(df):
 
     # Group by available columns
     summary = df.groupby(group_columns)['num_connections'].sum().reset_index()
-        
+
     logger.debug(f"Summary shape after grouping: {summary.shape}")
     logger.debug(f"Summary columns: {summary.columns.tolist()}")
     logger.debug(f"First few rows of summary:\n{summary.head()}")
@@ -2222,19 +2764,24 @@ def summarize_traffic(df):
     # Convert to a more readable format
     summary_list = []
     for _, row in summary.iterrows():
-        # Build source and destination info based on available columns
+        # Build source info: prefer app/env labels, fall back to IP list name
         src_info = []
-        if 'src_app' in row:
+        if 'src_app' in row and row['src_app']:
             src_info.append(row['src_app'])
-        if 'src_env' in row:
+        if 'src_env' in row and row['src_env']:
             src_info.append(f"({row['src_env']})")
+        if not src_info and 'src_ip_lists' in row and row['src_ip_lists']:
+            src_info.append(f"[IPList: {row['src_ip_lists']}]")
         src_str = " ".join(src_info) if src_info else "Unknown Source"
 
+        # Build destination info: prefer app/env labels, fall back to IP list name
         dst_info = []
-        if 'dst_app' in row:
+        if 'dst_app' in row and row['dst_app']:
             dst_info.append(row['dst_app'])
-        if 'dst_env' in row:
+        if 'dst_env' in row and row['dst_env']:
             dst_info.append(f"({row['dst_env']})")
+        if not dst_info and 'dst_ip_lists' in row and row['dst_ip_lists']:
+            dst_info.append(f"[IPList: {row['dst_ip_lists']}]")
         dst_str = " ".join(dst_info) if dst_info else "Unknown Destination"
 
         if src_str != dst_str:
@@ -2243,10 +2790,10 @@ def summarize_traffic(df):
             summary_list.append(
                 f"From {src_str} to {dst_str} on {port_info} {proto_info}: {row['num_connections']} connections"
             )
-    
+
     if not summary_list:
         return "No traffic patterns to summarize"
-        
+
     return "\n".join(summary_list)
 
 async def main():

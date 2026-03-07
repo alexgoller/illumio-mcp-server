@@ -24,3 +24,7 @@ illumio-mcp = "illumio_mcp:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/illumio_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
