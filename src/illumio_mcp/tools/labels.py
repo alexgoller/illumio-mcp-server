@@ -7,7 +7,7 @@ from ..pce import get_pce
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_get_labels(arguments: dict) -> list:
+def handle_get_labels(arguments: dict) -> list:
     logger.debug("Initializing PCE connection")
     try:
         pce = get_pce()
@@ -39,7 +39,7 @@ async def handle_get_labels(arguments: dict) -> list:
         )]
 
 
-async def handle_create_label(arguments: dict) -> list:
+def handle_create_label(arguments: dict) -> list:
     logger.debug(f"Creating label with key: {arguments['key']} and value: {arguments['value']}")
     try:
         pce = get_pce()
@@ -59,7 +59,7 @@ async def handle_create_label(arguments: dict) -> list:
         )]
 
 
-async def handle_update_label(arguments: dict) -> list:
+def handle_update_label(arguments: dict) -> list:
     logger.debug("Initializing PCE connection")
     try:
         pce = get_pce()
@@ -127,7 +127,7 @@ async def handle_update_label(arguments: dict) -> list:
         )]
 
 
-async def handle_delete_label(arguments: dict) -> list:
+def handle_delete_label(arguments: dict) -> list:
     logger.debug(f"Deleting label with key: {arguments['key']} and value: {arguments['value']}")
     try:
         pce = get_pce()

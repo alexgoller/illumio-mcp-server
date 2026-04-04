@@ -7,7 +7,7 @@ from ..pce import get_pce
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_get_workloads(arguments: dict) -> list:
+def handle_get_workloads(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET WORKLOADS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -41,7 +41,7 @@ async def handle_get_workloads(arguments: dict) -> list:
         )]
 
 
-async def handle_create_workload(arguments: dict) -> list:
+def handle_create_workload(arguments: dict) -> list:
     logger.debug(f"Creating workload with name: {arguments['name']} and ip_addresses: {arguments['ip_addresses']}")
     logger.debug(f"Labels: {arguments['labels']}")
     try:
@@ -94,7 +94,7 @@ async def handle_create_workload(arguments: dict) -> list:
         )]
 
 
-async def handle_update_workload(arguments: dict) -> list:
+def handle_update_workload(arguments: dict) -> list:
     logger.debug(f"UPDATE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
         pce = get_pce()
@@ -157,7 +157,7 @@ async def handle_update_workload(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
 
-async def handle_delete_workload(arguments: dict) -> list:
+def handle_delete_workload(arguments: dict) -> list:
     logger.debug(f"DELETE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
         pce = get_pce()

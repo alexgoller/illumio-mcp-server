@@ -6,7 +6,7 @@ from ..pce import get_pce, PCE_ORG_ID
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_get_container_workload_profiles(arguments: dict) -> list:
+def handle_get_container_workload_profiles(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET CONTAINER WORKLOAD PROFILES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -66,7 +66,7 @@ async def handle_get_container_workload_profiles(arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_update_container_workload_profile(arguments: dict) -> list:
+def handle_update_container_workload_profile(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE CONTAINER WORKLOAD PROFILE CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -97,7 +97,7 @@ async def handle_update_container_workload_profile(arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_get_kubernetes_workloads(arguments: dict) -> list:
+def handle_get_kubernetes_workloads(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET KUBERNETES WORKLOADS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -143,7 +143,7 @@ async def handle_get_kubernetes_workloads(arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_get_container_clusters(arguments: dict) -> list:
+def handle_get_container_clusters(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET CONTAINER CLUSTERS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")

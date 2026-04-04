@@ -7,7 +7,7 @@ from ..pce import get_pce
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_get_rulesets(arguments: dict) -> list:
+def handle_get_rulesets(arguments: dict) -> list:
     logger.debug(f"GET RULESETS CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
         pce = get_pce()
@@ -86,7 +86,7 @@ async def handle_get_rulesets(arguments: dict) -> list:
         )]
 
 
-async def handle_create_ruleset(arguments: dict) -> list:
+def handle_create_ruleset(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE RULESET CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -327,7 +327,7 @@ async def handle_create_ruleset(arguments: dict) -> list:
         )]
 
 
-async def handle_update_ruleset(arguments: dict) -> list:
+def handle_update_ruleset(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE RULESET CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -443,7 +443,7 @@ async def handle_update_ruleset(arguments: dict) -> list:
         )]
 
 
-async def handle_delete_ruleset(arguments: dict) -> list:
+def handle_delete_ruleset(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DELETE RULESET CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -497,7 +497,7 @@ async def handle_delete_ruleset(arguments: dict) -> list:
         )]
 
 
-async def handle_provision_policy(arguments: dict) -> list:
+def handle_provision_policy(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("PROVISION POLICY CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")

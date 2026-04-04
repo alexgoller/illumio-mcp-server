@@ -6,7 +6,7 @@ from ..pce import get_pce
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_get_iplists(arguments: dict) -> list:
+def handle_get_iplists(arguments: dict) -> list:
     logger.debug(f"GET IP LISTS CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
         pce = get_pce()
@@ -25,7 +25,7 @@ async def handle_get_iplists(arguments: dict) -> list:
                 'name': iplist.name,
                 'description': iplist.description,
                 'ip_ranges': [str(ip_range) for ip_range in iplist.ip_ranges] if iplist.ip_ranges else [],
-                'fqdns': iplist.fqdns if hasattr(iplist, 'fqdns') else [],
+                'fqdns': [str(fqdn) for fqdn in iplist.fqdns] if hasattr(iplist, 'fqdns') and iplist.fqdns else [],
                 'created_at': str(iplist.created_at) if hasattr(iplist, 'created_at') else None,
                 'updated_at': str(iplist.updated_at) if hasattr(iplist, 'updated_at') else None,
             }
@@ -41,7 +41,7 @@ async def handle_get_iplists(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
 
-async def handle_create_iplist(arguments: dict) -> list:
+def handle_create_iplist(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE IP LIST CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -129,7 +129,7 @@ async def handle_create_iplist(arguments: dict) -> list:
         )]
 
 
-async def handle_update_iplist(arguments: dict) -> list:
+def handle_update_iplist(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE IP LIST CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -230,7 +230,7 @@ async def handle_update_iplist(arguments: dict) -> list:
         )]
 
 
-async def handle_delete_iplist(arguments: dict) -> list:
+def handle_delete_iplist(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DELETE IP LIST CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")

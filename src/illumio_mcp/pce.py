@@ -1,3 +1,4 @@
+import asyncio
 import os
 import urllib3
 from illumio import PolicyComputeEngine
@@ -12,9 +13,20 @@ PCE_TLS_VERIFY = os.getenv("PCE_TLS_VERIFY", "true").lower() not in ("false", "0
 if not PCE_TLS_VERIFY:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+_pce_instance = None
+
 
 def get_pce() -> PolicyComputeEngine:
-    pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
-    pce.set_credentials(API_KEY, API_SECRET)
-    pce._session.verify = PCE_TLS_VERIFY
-    return pce
+    global _pce_instance
+    if _pce_instance is None:
+        _pce_instance = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+        _pce_instance.set_credentials(API_KEY, API_SECRET)
+        _pce_instance._session.verify = PCE_TLS_VERIFY
+    return _pce_instance
+
+
+async def run_sync(func, *args, **kwargs):
+    """Run a synchronous function in a thread pool to avoid blocking the event loop."""
+    if kwargs:
+        return await asyncio.to_thread(lambda: func(*args, **kwargs))
+    return await asyncio.to_thread(func, *args)

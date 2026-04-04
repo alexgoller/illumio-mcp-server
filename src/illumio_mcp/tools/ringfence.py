@@ -12,7 +12,7 @@ from .traffic import to_dataframe, MCP_BUG_MAX_RESULTS
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_create_ringfence(arguments: dict) -> list:
+def handle_create_ringfence(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE RINGFENCE CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -510,7 +510,7 @@ async def handle_create_ringfence(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_ringfence_batch(arguments: dict) -> list:
+def handle_ringfence_batch(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("RINGFENCE BATCH CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -524,7 +524,7 @@ async def handle_ringfence_batch(arguments: dict) -> list:
 
         if auto_order:
             # Use infrastructure identification to order apps
-            infra_result = await handle_identify_infrastructure_services({
+            infra_result = handle_identify_infrastructure_services({
                 "lookback_days": lookback_days,
                 "top_n": 1000
             })
@@ -551,7 +551,7 @@ async def handle_ringfence_batch(arguments: dict) -> list:
             }
 
             try:
-                rf_result = await handle_create_ringfence(rf_args)
+                rf_result = handle_create_ringfence(rf_args)
                 result_data = json.loads(rf_result[0].text)
                 results.append({
                     "app": app["app_name"],
@@ -589,7 +589,7 @@ async def handle_ringfence_batch(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_identify_infrastructure_services(arguments: dict) -> list:
+def handle_identify_infrastructure_services(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("IDENTIFY INFRASTRUCTURE SERVICES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -851,7 +851,7 @@ async def handle_identify_infrastructure_services(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_detect_lateral_movement_paths(arguments: dict) -> list:
+def handle_detect_lateral_movement_paths(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DETECT LATERAL MOVEMENT PATHS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")

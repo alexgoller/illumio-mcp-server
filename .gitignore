@@ -35,3 +35,6 @@ _version.py
 *.env
 
 illumio-mcp.log
+
+# mcporter / MCP client configs (may contain credentials)
+config/

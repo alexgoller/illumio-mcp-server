@@ -6,7 +6,7 @@ from ..pce import get_pce
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_get_services(arguments: dict) -> list:
+def handle_get_services(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET SERVICES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -61,14 +61,27 @@ async def handle_get_services(arguments: dict) -> list:
                     continue
 
             # Add windows services if present
-            if hasattr(service, 'windows_services'):
+            if hasattr(service, 'windows_services') and service.windows_services:
                 logger.debug(f"Found windows_services for {service.name}")
-                service_dict['windows_services'] = service.windows_services
+                ws_list = []
+                for ws in service.windows_services:
+                    ws_dict = {}
+                    if hasattr(ws, 'service_name') and ws.service_name:
+                        ws_dict['service_name'] = ws.service_name
+                    if hasattr(ws, 'process_name') and ws.process_name:
+                        ws_dict['process_name'] = ws.process_name
+                    if hasattr(ws, 'port') and ws.port is not None:
+                        ws_dict['port'] = ws.port
+                    if hasattr(ws, 'proto') and ws.proto:
+                        ws_dict['proto'] = ws.proto
+                    if hasattr(ws, 'to_port') and ws.to_port is not None:
+                        ws_dict['to_port'] = ws.to_port
+                    ws_list.append(ws_dict)
+                service_dict['windows_services'] = ws_list
 
             service_data.append(service_dict)
             logger.debug(f"Completed processing service: {service.name}")
 
-        logger.debug(f"Service data: {json.dumps(service_data, indent=2)}")
         logger.debug(f"Successfully processed {len(service_data)} services")
         return [types.TextContent(
             type="text",
@@ -87,7 +100,7 @@ async def handle_get_services(arguments: dict) -> list:
         )]
 
 
-async def handle_create_service(arguments: dict) -> list:
+def handle_create_service(arguments: dict) -> list:
     logger.debug(f"CREATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
         pce = get_pce()
@@ -112,7 +125,7 @@ async def handle_create_service(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_update_service(arguments: dict) -> list:
+def handle_update_service(arguments: dict) -> list:
     logger.debug(f"UPDATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
         pce = get_pce()
@@ -157,7 +170,7 @@ async def handle_update_service(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-async def handle_delete_service(arguments: dict) -> list:
+def handle_delete_service(arguments: dict) -> list:
     logger.debug(f"DELETE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
         pce = get_pce()

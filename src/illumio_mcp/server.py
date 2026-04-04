@@ -1,13 +1,13 @@
+import asyncio
 import os
 import json
 import logging
+import time
 import mcp.types as types
 from mcp.server.models import InitializationOptions
 from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
 import dotenv
-from illumio import ServicePort
-from json import JSONEncoder
 from pathlib import Path
 
 from .tools import TOOL_HANDLERS
@@ -3119,9 +3119,14 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
     if handler is None:
         raise ValueError(f"Unknown tool: {name}")
     try:
-        return await handler(arguments or {})
+        t0 = time.monotonic()
+        result = await asyncio.to_thread(handler, arguments or {})
+        elapsed = time.monotonic() - t0
+        logger.info(f"Tool {name} completed in {elapsed:.2f}s")
+        return result
     except Exception as e:
         error_msg = f"Tool {name} failed: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 async def main():
@@ -3140,12 +3145,3 @@ async def main():
                 ),
             ),
         )
-
-class ServicePortEncoder(JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, ServicePort):
-            return {
-                'port': obj.port,
-                'protocol': obj.protocol
-            }
-        return super().default(obj)

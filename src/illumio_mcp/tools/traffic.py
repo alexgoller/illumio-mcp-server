@@ -6,8 +6,7 @@ import mcp.types as types
 from illumio import TrafficQuery
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
-from ..pce import get_pce, PCE_HOST, PCE_PORT, PCE_ORG_ID, API_KEY, API_SECRET, PCE_TLS_VERIFY
-from illumio import PolicyComputeEngine
+from ..pce import get_pce, run_sync
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -15,9 +14,7 @@ MCP_BUG_MAX_RESULTS = 500
 
 
 def to_dataframe(flows):
-    pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
-    pce.set_credentials(API_KEY, API_SECRET)
-    pce._session.verify = PCE_TLS_VERIFY
+    pce = get_pce()
 
     label_href_map = {}
     value_href_map = {}
@@ -164,7 +161,7 @@ def summarize_traffic(df):
     return "\n".join(summary_list)
 
 
-async def handle_get_traffic_flows(arguments: dict) -> list:
+def handle_get_traffic_flows(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET TRAFFIC FLOWS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -272,7 +269,7 @@ async def handle_get_traffic_flows(arguments: dict) -> list:
         )]
 
 
-async def handle_get_traffic_flows_summary(arguments: dict) -> list:
+def handle_get_traffic_flows_summary(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET TRAFFIC FLOWS SUMMARY CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -350,7 +347,7 @@ async def handle_get_traffic_flows_summary(arguments: dict) -> list:
         )]
 
 
-async def handle_find_unmanaged_traffic(arguments: dict) -> list:
+def handle_find_unmanaged_traffic(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("FIND UNMANAGED TRAFFIC CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")

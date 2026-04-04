@@ -6,7 +6,7 @@ from ..pce import get_pce, PCE_ORG_ID
 logger = logging.getLogger('illumio_mcp')
 
 
-async def handle_check_pce_connection(arguments: dict) -> list:
+def handle_check_pce_connection(arguments: dict) -> list:
     logger.debug("Initializing PCE connection")
     try:
         pce = get_pce()
@@ -24,7 +24,7 @@ async def handle_check_pce_connection(arguments: dict) -> list:
         )]
 
 
-async def handle_get_events(arguments: dict) -> list:
+def handle_get_events(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET EVENTS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -77,7 +77,7 @@ async def handle_get_events(arguments: dict) -> list:
         )]
 
 
-async def handle_get_pairing_profiles(arguments: dict) -> list:
+def handle_get_pairing_profiles(arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET PAIRING PROFILES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
