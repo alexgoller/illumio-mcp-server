@@ -12,6 +12,54 @@ logger = logging.getLogger('illumio_mcp')
 
 MCP_BUG_MAX_RESULTS = 500
 
+# MCP tool responses land in the LLM's context window.
+# Too large = wastes tokens and can exceed transport limits.
+# Too small = not enough data for useful analysis.
+# 800KB leaves headroom under the ~1MB practical transport limit.
+MCP_MAX_RESPONSE_BYTES = 800_000
+
+
+def _build_split_response(df, total_pce_flows, total_grouped_rows):
+    """Build a compact MCP response using split format (columns + data arrays).
+
+    Split format avoids repeating column names per row — ~60-70% smaller than
+    orient='records' for typical traffic data.  Includes metadata so the LLM
+    knows whether results were truncated and how much data exists.
+    """
+    df = df.sort_values('num_connections', ascending=False).reset_index(drop=True)
+
+    def _serialize(frame):
+        # NaN → null: astype(object) prevents pandas from coercing None back to NaN
+        clean = frame.astype(object).where(frame.notna(), None)
+        return json.dumps({
+            "total_pce_flows": total_pce_flows,
+            "total_rows": total_grouped_rows,
+            "returned_rows": len(frame),
+            "truncated": len(frame) < total_grouped_rows,
+            "columns": frame.columns.tolist(),
+            "data": clean.values.tolist(),
+        }, default=str)
+
+    payload = _serialize(df)
+    if len(payload) <= MCP_MAX_RESPONSE_BYTES:
+        return payload
+
+    # Binary search for the largest row count that fits
+    lo, hi = 1, len(df)
+    best = df.head(1)
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = df.head(mid)
+        size = len(_serialize(candidate))
+        if size <= MCP_MAX_RESPONSE_BYTES:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    logger.warning(f"Truncated response from {len(df)} to {len(best)} rows to fit MCP limit ({MCP_MAX_RESPONSE_BYTES} bytes)")
+    return _serialize(best)
+
 
 def to_dataframe(flows):
     pce = get_pce()
@@ -225,6 +273,14 @@ def handle_get_traffic_flows(arguments: dict) -> list:
 
         df = to_dataframe(all_traffic)
 
+        if df.empty:
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"message": "No traffic flows found for the given query parameters",
+                                 "start_date": arguments['start_date'],
+                                 "end_date": arguments['end_date']})
+            )]
+
         # Group by columns that exist, always including IP list names
         group_cols = ['src_ip', 'dst_ip', 'proto', 'port', 'policy_decision']
         for col in ['src_ip_lists', 'dst_ip_lists', 'src_hostname', 'dst_hostname']:
@@ -233,32 +289,13 @@ def handle_get_traffic_flows(arguments: dict) -> list:
         group_cols = [c for c in group_cols if c in df.columns]
         df = df.groupby(group_cols).agg({'num_connections': 'sum'}).reset_index()
 
-        # limit dataframe json output to less than 1048576
-        MAX_ROWS = 1000
-        if len(df) > MAX_ROWS:
-            logger.warning(f"Truncating results from {len(df)} to {MAX_ROWS} entries")
-            df = df.nlargest(MAX_ROWS, 'num_connections')
-
-        response_size = len(df.to_json(orient="records"))
-
-        if response_size > 1048576:
-            logger.warning(f"Response size exceeds 1MB limit. Truncating to {MAX_ROWS} entries")
-            step_down = 0.9
-            while response_size > 1048576 or step_down == 0:
-                rows = int(MAX_ROWS * step_down)
-                step_down = step_down - 0.1
-                df = df.nlargest(rows, 'num_connections')
-                response_size = len(df.to_json(orient="records"))
-                logger.debug(f"Response size: {response_size} Step down: {step_down}")
-
-        # trying this in case GC doesn't work
-        df_json = df.to_json(orient="records")
+        total_grouped_rows = len(df)
+        payload = _build_split_response(df, total_pce_flows=len(all_traffic), total_grouped_rows=total_grouped_rows)
         del df
 
-        # return dataframe df in json format
         return [types.TextContent(
             type="text",
-            text=df_json
+            text=payload
         )]
     except Exception as e:
         error_msg = f"Failed in PCE operation: {str(e)}"
