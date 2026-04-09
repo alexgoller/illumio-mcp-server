@@ -7,7 +7,8 @@ from illumio import TrafficQuery
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
 from ..pce import get_pce
-from .traffic import to_dataframe, MCP_BUG_MAX_RESULTS
+from .traffic import to_dataframe
+from .constants import MCP_BUG_MAX_RESULTS
 
 logger = logging.getLogger('illumio_mcp')
 

@@ -2012,7 +2012,7 @@ async def handle_list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="get-workloads",
-            description="Get workloads from the PCE with optional filtering",
+            description="Get workloads from the PCE. Use detail_level to control breadth vs depth: 'compact' (default) for tabular overviews of thousands of workloads, 'full' for complete data on specific workloads, 'labels_only' for maximum breadth with just identity and labels.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -2029,6 +2029,12 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                     "labels": {"type": "string", "description": "JSON-encoded list of label URIs to filter by"},
                     "max_results": {"type": "integer", "description": "Maximum number of workloads to return (default 10000)"},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": ["compact", "full", "labels_only"],
+                        "description": "Level of detail. 'compact' (default): tabular summary with key fields and labels. 'full': complete workload data including services, VEN agent, interfaces. 'labels_only': minimal table of href, name, hostname, and labels.",
+                        "default": "compact"
+                    },
                 },
             },
         ),

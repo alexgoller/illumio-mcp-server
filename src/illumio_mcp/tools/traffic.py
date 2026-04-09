@@ -7,16 +7,9 @@ from illumio import TrafficQuery
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
 from ..pce import get_pce, run_sync
+from .constants import MCP_BUG_MAX_RESULTS, MCP_MAX_RESPONSE_BYTES
 
 logger = logging.getLogger('illumio_mcp')
-
-MCP_BUG_MAX_RESULTS = 500
-
-# MCP tool responses land in the LLM's context window.
-# Too large = wastes tokens and can exceed transport limits.
-# Too small = not enough data for useful analysis.
-# 800KB leaves headroom under the ~1MB practical transport limit.
-MCP_MAX_RESPONSE_BYTES = 800_000
 
 
 def _build_split_response(df, total_pce_flows, total_grouped_rows):

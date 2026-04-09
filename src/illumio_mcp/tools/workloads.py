@@ -1,10 +1,156 @@
 import json
 import logging
+import pandas as pd
 import mcp.types as types
 from illumio import Label, Workload, Interface
 from ..pce import get_pce
+from .constants import MCP_MAX_RESPONSE_BYTES
 
 logger = logging.getLogger('illumio_mcp')
+
+
+def _build_label_map(pce):
+    """Build {href: {key, value}} lookup from all PCE labels."""
+    label_map = {}
+    for l in pce.labels.get(params={'max_results': 10000}):
+        label_map[l.href] = {"key": l.key, "value": l.value}
+    return label_map
+
+
+def _truncate_split(df, metadata, max_bytes=MCP_MAX_RESPONSE_BYTES):
+    """Serialize DataFrame as split-format JSON, truncating to fit max_bytes.
+
+    Returns JSON string with metadata + columns + data arrays.
+    """
+    total = len(df)
+
+    def _serialize(frame, trunc):
+        clean = frame.astype(object).where(frame.notna(), None)
+        envelope = {**metadata, "returned": len(frame), "truncated": trunc, "columns": frame.columns.tolist(), "data": clean.values.tolist()}
+        return json.dumps(envelope, default=str)
+
+    payload = _serialize(df, False)
+    if len(payload) <= max_bytes:
+        return payload
+
+    # Binary search for largest row count that fits
+    lo, hi = 1, total
+    best = df.head(1)
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = df.head(mid)
+        if len(_serialize(candidate, True)) <= max_bytes:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    logger.warning(f"Truncated workloads from {total} to {len(best)} rows to fit MCP limit")
+    return _serialize(best, True)
+
+
+def _truncate_records(records, metadata, max_bytes=MCP_MAX_RESPONSE_BYTES):
+    """Serialize a list of dicts as JSON records, truncating to fit max_bytes."""
+    def _serialize(recs, trunc):
+        envelope = {**metadata, "returned": len(recs), "truncated": trunc, "workloads": recs}
+        return json.dumps(envelope, default=str)
+
+    payload = _serialize(records, False)
+    if len(payload) <= max_bytes:
+        return payload
+
+    # Binary search for largest count that fits
+    lo, hi = 1, len(records)
+    best = records[:1]
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = records[:mid]
+        if len(_serialize(candidate, True)) <= max_bytes:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    logger.warning(f"Truncated workloads from {len(records)} to {len(best)} records to fit MCP limit")
+    return _serialize(best, True)
+
+
+def _format_compact(workloads, label_map):
+    """Compact split-format: key fields + dynamic label columns."""
+    rows = []
+    for w in workloads:
+        row = {
+            "href": w.href,
+            "name": w.name,
+            "hostname": w.hostname,
+            "ip_addresses": ", ".join(
+                intf.address for intf in (w.interfaces or [])
+                if hasattr(intf, 'address') and intf.address
+            ) or None,
+            "os_type": w.os_type,
+            "online": w.online,
+            "managed": bool(w.agent or w.ven),
+            "enforcement_mode": w.enforcement_mode,
+            "visibility_level": w.visibility_level,
+        }
+        if w.labels:
+            for l in w.labels:
+                info = label_map.get(l.href)
+                if info:
+                    row[info["key"]] = info["value"]
+        rows.append(row)
+
+    if not rows:
+        return json.dumps({"total": 0, "returned": 0, "truncated": False,
+                           "message": "No workloads found"})
+
+    df = pd.DataFrame(rows)
+    return _truncate_split(df, {"total": len(rows)})
+
+
+def _format_full(workloads, label_map):
+    """Full detail: complete to_json() with resolved labels."""
+    records = []
+    for w in workloads:
+        d = w.to_json()
+        # Resolve label hrefs to key/value
+        if "labels" in d and isinstance(d["labels"], list):
+            resolved = []
+            for lbl in d["labels"]:
+                href = lbl.get("href") if isinstance(lbl, dict) else getattr(lbl, 'href', None)
+                if href and href in label_map:
+                    resolved.append({"href": href, **label_map[href]})
+                elif href:
+                    resolved.append({"href": href})
+            d["labels"] = resolved
+        d["managed"] = bool(w.agent or w.ven)
+        records.append(d)
+
+    if not records:
+        return json.dumps({"total": 0, "returned": 0, "truncated": False,
+                           "message": "No workloads found"})
+
+    return _truncate_records(records, {"total": len(records)})
+
+
+def _format_labels_only(workloads, label_map):
+    """Minimal split-format: identity + labels only. Maximum breadth."""
+    rows = []
+    for w in workloads:
+        row = {"href": w.href, "name": w.name, "hostname": w.hostname}
+        if w.labels:
+            for l in w.labels:
+                info = label_map.get(l.href)
+                if info:
+                    row[info["key"]] = info["value"]
+        rows.append(row)
+
+    if not rows:
+        return json.dumps({"total": 0, "returned": 0, "truncated": False,
+                           "message": "No workloads found"})
+
+    df = pd.DataFrame(rows)
+    return _truncate_split(df, {"total": len(rows)})
 
 
 def handle_get_workloads(arguments: dict) -> list:
@@ -13,9 +159,9 @@ def handle_get_workloads(arguments: dict) -> list:
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
-    logger.debug("Initializing PCE connection")
     try:
         pce = get_pce()
+        detail_level = arguments.get('detail_level', 'compact')
 
         params = {"include": "labels", "max_results": arguments.get('max_results', 10000)}
         for param in ['name', 'hostname', 'ip_address', 'description', 'labels', 'enforcement_mode']:
@@ -27,18 +173,22 @@ def handle_get_workloads(arguments: dict) -> list:
             params['online'] = arguments['online']
 
         workloads = pce.workloads.get(params=params)
-        logger.debug(f"Successfully retrieved {len(workloads)} workloads")
-        return [types.TextContent(
-            type="text",
-            text=f"Workloads: {workloads}"
-        )]
+        logger.debug(f"Retrieved {len(workloads)} workloads, detail_level={detail_level}")
+
+        label_map = _build_label_map(pce)
+
+        if detail_level == 'full':
+            payload = _format_full(workloads, label_map)
+        elif detail_level == 'labels_only':
+            payload = _format_labels_only(workloads, label_map)
+        else:
+            payload = _format_compact(workloads, label_map)
+
+        return [types.TextContent(type="text", text=payload)]
     except Exception as e:
         error_msg = f"Failed in PCE operation: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return [types.TextContent(
-            type="text",
-            text=f"Error: {error_msg}"
-        )]
+        return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
 
 def handle_create_workload(arguments: dict) -> list:
