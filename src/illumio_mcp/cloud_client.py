@@ -2,8 +2,9 @@
 
 Two separate clients for two auth models:
 - CloudPlatformClient: Basic auth + X-Tenant-Id (inventory + labeling)
-- CloudTrafficClient: x-api-key + x-api-secret headers (unified traffic)
+- CloudTrafficClient: x-api-key + x-api-secret headers (unified traffic / FQS)
 
+All clients share the same credentials: CLOUD_API_HOST, CLOUD_API_KEY, CLOUD_API_SECRET, CLOUD_TENANT_ID.
 Both use the singleton pattern (like pce.py) and requests.Session for connection reuse.
 """
 
@@ -15,17 +16,11 @@ import requests
 
 logger = logging.getLogger('illumio_mcp')
 
-# Cloud Platform API (Inventory + Labeling)
 CLOUD_API_HOST = os.getenv("CLOUD_API_HOST")
 CLOUD_API_KEY = os.getenv("CLOUD_API_KEY")
 CLOUD_API_SECRET = os.getenv("CLOUD_API_SECRET")
 CLOUD_TENANT_ID = os.getenv("CLOUD_TENANT_ID")
 
-# Unified Traffic API
-CLOUD_TRAFFIC_API_KEY = os.getenv("CLOUD_TRAFFIC_API_KEY")
-CLOUD_TRAFFIC_API_SECRET = os.getenv("CLOUD_TRAFFIC_API_SECRET")
-
-# Shared
 CLOUD_TLS_VERIFY = os.getenv("CLOUD_TLS_VERIFY", "true").lower() not in ("false", "0", "no")
 
 if not CLOUD_TLS_VERIFY:
@@ -88,17 +83,17 @@ class CloudTrafficClient:
     def __init__(self):
         self._session = requests.Session()
         self._session.headers.update({
-            "x-api-key": CLOUD_TRAFFIC_API_KEY,
-            "x-api-secret": CLOUD_TRAFFIC_API_SECRET,
+            "x-api-key": CLOUD_API_KEY,
+            "x-api-secret": CLOUD_API_SECRET,
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
         self._session.verify = CLOUD_TLS_VERIFY
-        self._base_url = (os.getenv("CLOUD_TRAFFIC_API_HOST") or CLOUD_API_HOST or "").rstrip("/")
+        self._base_url = CLOUD_API_HOST.rstrip("/") if CLOUD_API_HOST else ""
 
     @classmethod
     def is_configured(cls):
-        return all([CLOUD_TRAFFIC_API_KEY, CLOUD_TRAFFIC_API_SECRET, CLOUD_API_HOST or os.getenv("CLOUD_TRAFFIC_API_HOST")])
+        return all([CLOUD_API_HOST, CLOUD_API_KEY, CLOUD_API_SECRET])
 
     @classmethod
     def get_instance(cls):
@@ -106,7 +101,7 @@ class CloudTrafficClient:
             if not cls.is_configured():
                 raise RuntimeError(
                     "Cloud Traffic API not configured. "
-                    "Set CLOUD_TRAFFIC_API_KEY, CLOUD_TRAFFIC_API_SECRET, and CLOUD_API_HOST environment variables."
+                    "Set CLOUD_API_HOST, CLOUD_API_KEY, CLOUD_API_SECRET environment variables."
                 )
             cls._instance = cls()
         return cls._instance
