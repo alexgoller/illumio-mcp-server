@@ -38,3 +38,4 @@ illumio-mcp.log
 
 # mcporter / MCP client configs (may contain credentials)
 config/
+illumio-platform-api.pdf
