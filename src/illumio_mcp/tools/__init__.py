@@ -63,6 +63,18 @@ from .infra import (
     handle_get_events,
     handle_get_pairing_profiles,
 )
+from .cloud_inventory import (
+    handle_cloud_get_resources,
+)
+from .cloud_labeling import (
+    handle_cloud_assign_labels,
+    handle_cloud_remove_labels,
+)
+from .cloud_traffic import (
+    handle_cloud_get_traffic_queries,
+    handle_cloud_create_traffic_query,
+    handle_cloud_get_traffic_flows,
+)
 
 TOOL_HANDLERS = {
     # Workloads
@@ -119,4 +131,11 @@ TOOL_HANDLERS = {
     "check-pce-connection": handle_check_pce_connection,
     "get-events": handle_get_events,
     "get-pairing-profiles": handle_get_pairing_profiles,
+    # Cloud Platform
+    "cloud-get-resources": handle_cloud_get_resources,
+    "cloud-assign-labels": handle_cloud_assign_labels,
+    "cloud-remove-labels": handle_cloud_remove_labels,
+    "cloud-get-traffic-queries": handle_cloud_get_traffic_queries,
+    "cloud-create-traffic-query": handle_cloud_create_traffic_query,
+    "cloud-get-traffic-flows": handle_cloud_get_traffic_flows,
 }

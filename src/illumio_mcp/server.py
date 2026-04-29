@@ -3116,6 +3116,126 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                 },
             }
         ),
+        # ── Illumio Cloud Platform ──────────────────────────────────────────
+        types.Tool(
+            name="cloud-get-resources",
+            description="List and filter cloud resources from the Illumio Cloud inventory. Supports AWS, Azure, GCP, OCI. Use detail_level to control breadth vs depth.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "clouds": {"type": "array", "items": {"type": "string"}, "description": "Filter by cloud provider: aws, azure, gcp, oci"},
+                    "regions": {"type": "array", "items": {"type": "string"}, "description": "Filter by CSP region (e.g., us-west-1)"},
+                    "illumio_regions": {"type": "array", "items": {"type": "string"}, "description": "Filter by Illumio region"},
+                    "account_ids": {"type": "array", "items": {"type": "string"}, "description": "Filter by onboarded account IDs"},
+                    "object_types": {"type": "array", "items": {"type": "string"}, "description": "Filter by CSP object type (e.g., AWS::EC2::Instance)"},
+                    "categories": {"type": "array", "items": {"type": "string"}, "description": "Filter by category (CSP-defined groups)"},
+                    "subcategories": {"type": "array", "items": {"type": "string"}, "description": "Filter by subcategory"},
+                    "labels": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}, "description": "Filter by Illumio labels (key-value pairs)"},
+                    "ip_addresses": {"type": "array", "items": {"type": "string"}, "description": "Filter by IP addresses"},
+                    "resource_names": {"type": "array", "items": {"type": "string"}, "description": "Filter by resource names"},
+                    "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "Filter by Illumio resource IDs"},
+                    "csp_ids": {"type": "array", "items": {"type": "string"}, "description": "Filter by cloud service provider IDs"},
+                    "states": {"type": "array", "items": {"type": "string"}, "description": "Filter by CSP states"},
+                    "tags": {"type": "object", "description": "Filter by CSP tags (key-value map)"},
+                    "include_enforcement_status": {"type": "boolean", "description": "Include enforcement status in response"},
+                    "json_view": {"type": "boolean", "description": "Include raw CSP API JSON in response"},
+                    "max_results": {"type": "integer", "description": "Maximum resources to return (default 500)"},
+                    "detail_level": {
+                        "type": "string", "enum": ["compact", "full"],
+                        "description": "compact (default): tabular summary. full: complete resource JSON.",
+                        "default": "compact"
+                    },
+                },
+            }
+        ),
+        types.Tool(
+            name="cloud-assign-labels",
+            description="Assign Illumio labels to cloud resources. Resources are identified by csp_id. Note: env label requires app label, no duplicate label types per resource.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "assignments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "csp_id": {"type": "string", "description": "Cloud service provider ID of the resource"},
+                                "labels": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}},
+                            },
+                            "required": ["csp_id", "labels"]
+                        },
+                        "description": "List of resources and labels to assign"
+                    },
+                },
+                "required": ["assignments"]
+            }
+        ),
+        types.Tool(
+            name="cloud-remove-labels",
+            description="Remove Illumio labels from cloud resources. Resources are identified by csp_id. System labels cannot be removed.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "assignments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "csp_id": {"type": "string", "description": "Cloud service provider ID of the resource"},
+                                "labels": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}},
+                            },
+                            "required": ["csp_id", "labels"]
+                        },
+                        "description": "List of resources and labels to remove"
+                    },
+                },
+                "required": ["assignments"]
+            }
+        ),
+        types.Tool(
+            name="cloud-get-traffic-queries",
+            description="List async traffic flow query statuses from the Illumio unified traffic API. Shows query_id, status (completed/running), match counts, and download URLs.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            }
+        ),
+        types.Tool(
+            name="cloud-create-traffic-query",
+            description="Create an async traffic flow query in the Illumio unified traffic API. Queries run asynchronously — use cloud-get-traffic-queries to check status, then cloud-get-traffic-flows to download results.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "Start datetime (ISO 8601, e.g., 2025-08-01T00:00:00-07:00)"},
+                    "end_date": {"type": "string", "description": "End datetime (ISO 8601)"},
+                    "query_name": {"type": "string", "description": "Name for this query (default: mcp-cloud-traffic-query)"},
+                    "sources": {"type": "object", "description": "Source filters: {include: [[{label: {href}}]], exclude: [{label: {href}}]}"},
+                    "destinations": {"type": "object", "description": "Destination filters (same format as sources)"},
+                    "services": {"type": "object", "description": "Service filters: {include: [{port, to_port, proto}], exclude: [...]}"},
+                    "policy_decisions": {"type": "array", "items": {"type": "string"}, "description": "Filter: allowed, blocked, potentially_blocked, unknown"},
+                    "boundary_decisions": {"type": "array", "items": {"type": "string"}, "description": "Filter: blocked, allowed"},
+                    "data_sources": {"type": "object", "description": "Data source filters: {include: ['server'], exclude: ['server']}"},
+                    "max_results": {"type": "integer", "description": "Maximum results (default 10000)"},
+                    "sources_destinations_query_op": {"type": "string", "enum": ["and", "or"], "description": "Combine sources/destinations with AND or OR"},
+                    "exclude_workloads_from_ip_list_query": {"type": "boolean"},
+                    "aggregate_lows_across_days": {"type": "boolean"},
+                },
+                "required": ["start_date", "end_date"]
+            }
+        ),
+        types.Tool(
+            name="cloud-get-traffic-flows",
+            description="Download results of a completed async traffic flow query from the unified traffic API. Use cloud-get-traffic-queries first to find the query_id.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query_id": {"type": "string", "description": "UUID of the completed traffic query"},
+                    "offset": {"type": "integer", "description": "Starting point for flow retrieval (default 0)"},
+                    "limit": {"type": "integer", "description": "Max flows to download (default 5000)"},
+                },
+                "required": ["query_id"]
+            }
+        ),
     ]
 
 @server.call_tool()
