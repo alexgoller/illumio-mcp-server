@@ -81,25 +81,25 @@ class CloudPlatformClient:
 
 
 class CloudTrafficClient:
-    """Client for Unified Traffic APIs (x-api-key + x-api-secret headers)."""
+    """Client for Unified Traffic APIs (Basic auth + X-Tenant-Id, same as inventory)."""
 
     _instance = None
 
     def __init__(self):
         self._session = requests.Session()
+        creds = base64.b64encode(f"{CLOUD_API_KEY}:{CLOUD_API_SECRET}".encode()).decode()
         self._session.headers.update({
-            "x-api-key": CLOUD_TRAFFIC_API_KEY,
-            "x-api-secret": CLOUD_TRAFFIC_API_SECRET,
+            "Authorization": f"Basic {creds}",
+            "X-Tenant-Id": CLOUD_TENANT_ID,
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
         self._session.verify = CLOUD_TLS_VERIFY
-        # Traffic API may use same host or a different one; default to CLOUD_API_HOST
         self._base_url = (os.getenv("CLOUD_TRAFFIC_API_HOST") or CLOUD_API_HOST or "").rstrip("/")
 
     @classmethod
     def is_configured(cls):
-        return all([CLOUD_TRAFFIC_API_KEY, CLOUD_TRAFFIC_API_SECRET, CLOUD_API_HOST or os.getenv("CLOUD_TRAFFIC_API_HOST")])
+        return all([CLOUD_API_KEY, CLOUD_API_SECRET, CLOUD_TENANT_ID, CLOUD_API_HOST or os.getenv("CLOUD_TRAFFIC_API_HOST")])
 
     @classmethod
     def get_instance(cls):
@@ -107,7 +107,7 @@ class CloudTrafficClient:
             if not cls.is_configured():
                 raise RuntimeError(
                     "Cloud Traffic API not configured. "
-                    "Set CLOUD_TRAFFIC_API_KEY, CLOUD_TRAFFIC_API_SECRET, and CLOUD_API_HOST environment variables."
+                    "Set CLOUD_API_HOST, CLOUD_API_KEY, CLOUD_API_SECRET, CLOUD_TENANT_ID environment variables."
                 )
             cls._instance = cls()
         return cls._instance
