@@ -116,20 +116,32 @@ def build_http_context_for(
     request_id: str | None,
     confirm_manager: object | None = None,
     jti_store: object | None = None,
+    pce_mode: str = "per_user",
 ) -> ToolContext:
-    """Build a ToolContext for one HTTP request."""
-    pce = None
-    if keystore is not None and user_sub and user_iss:
-        try:
-            from .pce import build_pce_for
-            creds = keystore.get(sub=user_sub, iss=user_iss)
-            if creds is not None:
-                pce = build_pce_for(creds)
-        except Exception:
-            logger.exception("Failed to load PCE credentials for user %s", user_sub)
-    elif keystore is None:
-        # Dev-insecure mode: no keystore, fall back to env-loaded PCE (same as stdio)
+    """Build a ToolContext for one HTTP request.
+
+    In `per_user` mode (default), looks up the user's PCE creds in the keystore.
+    In `shared` mode, every request uses the env-loaded PCE singleton — no
+    keystore lookup, no per-user PCE attribution.
+    """
+    if pce_mode == "shared":
+        # Shared service-account mode: every authenticated user uses the same
+        # env-loaded PCE. SSO + role + audit + confirm still enforced.
         pce = get_pce_from_env()
+    else:
+        # per_user mode (Phase 3b)
+        pce = None
+        if keystore is not None and user_sub and user_iss:
+            try:
+                from .pce import build_pce_for
+                creds = keystore.get(sub=user_sub, iss=user_iss)
+                if creds is not None:
+                    pce = build_pce_for(creds)
+            except Exception:
+                logger.exception("Failed to load PCE credentials for user %s", user_sub)
+        elif keystore is None:
+            # Dev-insecure mode: no keystore, fall back to env-loaded PCE
+            pce = get_pce_from_env()
     return ToolContext(
         pce=pce,
         is_stdio=False,
@@ -141,6 +153,7 @@ def build_http_context_for(
         request_id=request_id,
         confirm_manager=confirm_manager,
         jti_store=jti_store,
+        pce_mode=pce_mode,
     )
 
 
