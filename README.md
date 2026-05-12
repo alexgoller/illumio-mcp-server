@@ -75,30 +75,48 @@ Add the following to the `custom_settings` section:
 }
 ```
 
-## HTTP transport (preview)
+## HTTP transport with OAuth Resource Server (Phase 3a)
 
-The server can also run over HTTP using the MCP Streamable HTTP transport
-(spec rev 2025-03-26). This is **Phase 2** of the multi-user rollout: the HTTP
-path is wired up but **there is no authentication yet** — anyone who can reach
-the port can use any PCE credentials configured on the server. Phase 3 adds
-OAuth + per-user PCE keys.
+The server runs over HTTP using the MCP Streamable HTTP transport (spec rev
+2025-03-26) and validates OAuth 2.1 bearer tokens issued by your IdP. This is
+**Phase 3a**: identity is enforced; per-user PCE keys land in Phase 3b.
 
-Start the server:
+### Running with auth (production-shaped)
 
 ```bash
-illumio-mcp-http                                       # 127.0.0.1:8080
-# or
-python -m illumio_mcp serve --http --port 8765
+export MCP_PUBLIC_URL=https://mcp.illumio.example
+export MCP_OAUTH_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+export MCP_OAUTH_JWKS_URL=https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys
+export MCP_OAUTH_AUDIENCE=https://mcp.illumio.example
+export MCP_OAUTH_REQUIRED_SCOPE=illumio-mcp.use   # default; override if needed
+illumio-mcp-http --host 127.0.0.1 --port 8080
 ```
 
-Connect from any MCP client (Claude Desktop, ChatGPT desktop, MCP Inspector)
-using the URL `http://127.0.0.1:8080/mcp` and transport "Streamable HTTP".
+The server refuses to start without these env vars (unless `MCP_DEV_INSECURE=1`).
 
-Health endpoints: `GET /healthz` (liveness), `GET /readyz` (readiness).
+MCP clients discover the AS via the standard RFC 9728 endpoint:
 
-**Safety:** the server refuses to bind anything other than `127.0.0.1`/`::1`/`localhost`
-unless `MCP_DEV_INSECURE=1` is set. **Do not run unauthenticated in production.**
-Wait for Phase 3 (OAuth Resource Server + per-user PCE keys).
+```
+GET /.well-known/oauth-protected-resource
+```
+
+Unauthenticated requests to `/mcp` return `401` with
+`WWW-Authenticate: Bearer resource_metadata="<URL>"`, which any spec-compliant
+MCP client (Claude Desktop, ChatGPT, MCP Inspector) follows automatically to
+run PKCE auth code flow against the configured AS.
+
+### Running without auth (dev only)
+
+```bash
+MCP_DEV_INSECURE=1 illumio-mcp-http
+```
+
+The server logs a prominent warning. Do NOT use in production.
+
+### Health endpoints (always unauthenticated)
+
+- `GET /healthz` — liveness
+- `GET /readyz` — readiness (Phase 3a returns the same as healthz; Phase 3b/c will add PCE + JWKS reachability)
 
 ## Tools
 
