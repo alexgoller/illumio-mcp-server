@@ -70,6 +70,20 @@ def _get_stdio_context() -> ToolContext:
     return _stdio_ctx
 
 
+def build_http_context_for(user_sub: str | None, user_iss: str | None) -> ToolContext:
+    """Build a ToolContext for one HTTP request.
+
+    Phase 3a: PCE is still the env-loaded singleton (shared across users).
+    Phase 3b will look up the user's PCE creds from the KeyStore here.
+    """
+    return ToolContext(
+        pce=get_pce_from_env(),
+        is_stdio=False,
+        user_sub=user_sub,
+        user_iss=user_iss,
+    )
+
+
 server = Server("illumio-mcp")
 logging.debug("Server initialized")
 
