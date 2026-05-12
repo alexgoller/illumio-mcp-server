@@ -114,13 +114,10 @@ def build_http_context_for(
     user_role: str | None,
     audit_log: object | None,
     request_id: str | None,
+    confirm_manager: object | None = None,
+    jti_store: object | None = None,
 ) -> ToolContext:
-    """Build a ToolContext for one HTTP request.
-
-    Looks up the user's stored PCE credentials in the keystore. If found, builds
-    a fresh PCE client from them. If not found, returns a context with pce=None
-    and lets the dispatcher decide what to allow.
-    """
+    """Build a ToolContext for one HTTP request."""
     pce = None
     if keystore is not None and user_sub and user_iss:
         try:
@@ -142,6 +139,8 @@ def build_http_context_for(
         user_role=user_role,
         audit_log=audit_log,
         request_id=request_id,
+        confirm_manager=confirm_manager,
+        jti_store=jti_store,
     )
 
 
@@ -3298,6 +3297,49 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
                 "setup_path": "/setup",
             }, indent=2),
         )]
+
+    # Confirm-token check (Phase 3d) — only enforced over HTTP
+    if spec.requires_confirm and not ctx.is_stdio:
+        from .auth.confirm import canonical_params_hash, InvalidConfirmTokenError
+        meta = (arguments or {}).get("_meta") or {}
+        confirm_token = meta.get("confirm_token") if isinstance(meta, dict) else None
+        if not confirm_token:
+            _audit("denied", "missing_confirm_token")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "confirm_required",
+                "message": (
+                    f"Tool {name!r} requires a confirm token. "
+                    f"POST /confirm with {{\"tool\":\"{name}\",\"params_hash\":\"<sha256>\"}} "
+                    "to mint one, then re-call the tool with the token in params._meta.confirm_token."
+                ),
+                "params_hash": canonical_params_hash({k: v for k, v in (arguments or {}).items() if k != "_meta"}),
+            }, indent=2))]
+        if ctx.confirm_manager is None or ctx.jti_store is None:
+            _audit("denied", "confirm_not_configured")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "server_misconfigured",
+                "message": "Confirm-token enforcement is requested but the server has no manager configured.",
+            }, indent=2))]
+        params_for_hash = {k: v for k, v in (arguments or {}).items() if k != "_meta"}
+        try:
+            claims = ctx.confirm_manager.verify(
+                confirm_token,
+                sub=ctx.user_sub or "",
+                tool=name,
+                params_hash=canonical_params_hash(params_for_hash),
+            )
+        except InvalidConfirmTokenError as e:
+            _audit("denied", f"invalid_confirm_token: {e}")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "invalid_confirm_token",
+                "message": str(e),
+            }, indent=2))]
+        if not ctx.jti_store.mark_used(claims.jti, exp=claims.exp):
+            _audit("denied", "confirm_token_replay")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "confirm_token_replay",
+                "message": "This confirm token has already been used. Mint a fresh one.",
+            }, indent=2))]
 
     try:
         t0 = time.monotonic()
