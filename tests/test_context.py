@@ -91,3 +91,13 @@ def test_tool_context_carries_confirm_fields():
     )
     assert ctx.confirm_manager is sentinel_mgr
     assert ctx.jti_store is sentinel_jti
+
+
+def test_tool_context_pce_mode_default():
+    ctx = ToolContext(pce=object(), is_stdio=True)
+    assert ctx.pce_mode == "per_user"
+
+
+def test_tool_context_carries_shared_mode():
+    ctx = ToolContext(pce=object(), is_stdio=False, pce_mode="shared")
+    assert ctx.pce_mode == "shared"

@@ -1,8 +1,7 @@
 """ToolContext: the per-call object every tool handler receives.
 
-Phase 3d: adds `confirm_manager` and `jti_store`. The dispatcher uses these
-to validate the params._meta.confirm_token on `requires_confirm=True` tools
-when running over HTTP. Stdio leaves both None and skips the check.
+Phase 3e: adds `pce_mode` so handlers (and the dispatcher) can branch on
+shared vs per-user PCE behavior.
 """
 from dataclasses import dataclass
 
@@ -19,3 +18,4 @@ class ToolContext:
     request_id: str | None = None
     confirm_manager: object | None = None
     jti_store: object | None = None
+    pce_mode: str = "per_user"  # 'per_user' (default) | 'shared'
