@@ -2,15 +2,14 @@ import json
 import logging
 import mcp.types as types
 from illumio import RuleSet, LabelSet, Rule, AMS, ServicePort
-from ..pce import get_pce
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_get_rulesets(arguments: dict) -> list:
+def handle_get_rulesets(ctx, arguments: dict) -> list:
     logger.debug(f"GET RULESETS CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {}
         for param in ['name', 'description', 'labels']:
@@ -86,7 +85,7 @@ def handle_get_rulesets(arguments: dict) -> list:
         )]
 
 
-def handle_create_ruleset(arguments: dict) -> list:
+def handle_create_ruleset(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE RULESET CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -94,7 +93,7 @@ def handle_create_ruleset(arguments: dict) -> list:
 
     try:
         logger.debug("Initializing PCE connection...")
-        pce = get_pce()
+        pce = ctx.pce
 
         # populate the label maps
         label_href_map = {}
@@ -327,7 +326,7 @@ def handle_create_ruleset(arguments: dict) -> list:
         )]
 
 
-def handle_update_ruleset(arguments: dict) -> list:
+def handle_update_ruleset(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE RULESET CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -335,7 +334,7 @@ def handle_update_ruleset(arguments: dict) -> list:
 
     try:
         logger.debug("Initializing PCE connection...")
-        pce = get_pce()
+        pce = ctx.pce
 
         # Find the ruleset
         ruleset = None
@@ -443,7 +442,7 @@ def handle_update_ruleset(arguments: dict) -> list:
         )]
 
 
-def handle_delete_ruleset(arguments: dict) -> list:
+def handle_delete_ruleset(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DELETE RULESET CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -451,7 +450,7 @@ def handle_delete_ruleset(arguments: dict) -> list:
 
     try:
         logger.debug("Initializing PCE connection...")
-        pce = get_pce()
+        pce = ctx.pce
 
         # Find the ruleset
         ruleset = None
@@ -497,14 +496,14 @@ def handle_delete_ruleset(arguments: dict) -> list:
         )]
 
 
-def handle_provision_policy(arguments: dict) -> list:
+def handle_provision_policy(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("PROVISION POLICY CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         change_description = arguments.get("change_description", "Provisioned via MCP")
         hrefs = arguments.get("hrefs")
