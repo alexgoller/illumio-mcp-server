@@ -1,13 +1,14 @@
 """HTTP transport for the MCP server using Streamable HTTP (MCP spec 2025-03-26).
 
-Phase 3a: OAuth Resource Server semantics. Bearer-token required on /mcp
-unless MCP_DEV_INSECURE=1 is set. PCE credentials are still env-shared
-(per-user PCE keys arrive in Phase 3b).
+Phase 3b: per-request ToolContext built from the authenticated user's stored
+PCE credentials. Stdio is unaffected.
 
 Routes:
   GET  /healthz                                -> 200 (unauth)
   GET  /readyz                                 -> 200 (unauth)
   GET  /.well-known/oauth-protected-resource   -> RFC 9728 metadata (unauth)
+  GET  /setup                                  -> HTML form (auth required)
+  POST /setup                                  -> Submit credentials (auth required)
   *    /mcp                                    -> Streamable HTTP MCP (auth required)
 """
 from __future__ import annotations
@@ -34,20 +35,45 @@ from ..auth.config import (
 from ..auth.jwt_validator import JWTValidator
 from ..auth.middleware import JWTAuthMiddleware
 from ..auth.prm import build_prm_document
-from ..server import server as mcp_server  # the mcp.server.Server instance
+from ..auth.keystore_init import build_keystore_from_env
+from ..auth.crypto import MissingKEKError
+from ..server import (
+    server as mcp_server,
+    build_http_context_for,
+    set_http_context,
+    reset_http_context,
+)
+from .setup_page import build_setup_routes
 
 logger = logging.getLogger("illumio_mcp.transport.http")
 
 
 def _build_session_manager() -> StreamableHTTPSessionManager:
-    """Build the session manager. Stateless for the same reasons documented in
-    Phase 2."""
     return StreamableHTTPSessionManager(app=mcp_server, stateless=True)
 
 
-def _build_app(oauth_config: OAuthConfig | None) -> Starlette:
-    """Construct the ASGI app. If `oauth_config` is None, auth is bypassed
-    (dev-insecure mode); otherwise JWTAuthMiddleware is mounted on /mcp."""
+def _wrap_with_per_request_context(handle_request, keystore):
+    """Wrap the session manager's ASGI handler so it sets the per-request
+    ToolContext (built from the authenticated user) before invoking MCP."""
+    async def app(scope, receive, send):
+        if scope["type"] != "http":
+            await handle_request(scope, receive, send)
+            return
+        # JWTAuthMiddleware ran before us, so request.state.user is set if
+        # the request was authenticated. Build a ToolContext from it.
+        user = scope.get("state", {}).get("user")
+        sub = getattr(user, "sub", None) if user else None
+        iss = getattr(user, "iss", None) if user else None
+        ctx = build_http_context_for(sub, iss, keystore)
+        token = set_http_context(ctx)
+        try:
+            await handle_request(scope, receive, send)
+        finally:
+            reset_http_context(token)
+    return app
+
+
+def _build_app(oauth_config: OAuthConfig | None, keystore: object | None) -> Starlette:
     session_manager = _build_session_manager()
 
     @contextlib.asynccontextmanager
@@ -63,8 +89,9 @@ def _build_app(oauth_config: OAuthConfig | None) -> Starlette:
     async def readyz(_: Request) -> Response:
         return JSONResponse({"status": "ready"})
 
+    mcp_handler = _wrap_with_per_request_context(session_manager.handle_request, keystore)
     routes = [
-        Mount("/mcp", app=session_manager.handle_request),
+        Mount("/mcp", app=mcp_handler),
         Route("/healthz", healthz, methods=["GET"]),
         Route("/readyz", readyz, methods=["GET"]),
     ]
@@ -74,6 +101,8 @@ def _build_app(oauth_config: OAuthConfig | None) -> Starlette:
         async def prm(_: Request) -> Response:
             return JSONResponse(build_prm_document(oauth_config))
         routes.append(Route("/.well-known/oauth-protected-resource", prm, methods=["GET"]))
+        if keystore is not None:
+            routes.extend(build_setup_routes(keystore))
 
         validator = JWTValidator(oauth_config)
         from starlette.middleware import Middleware
@@ -85,11 +114,6 @@ def _build_app(oauth_config: OAuthConfig | None) -> Starlette:
 
 
 def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
-    """Run the HTTP transport via uvicorn. Blocks until SIGINT/SIGTERM.
-
-    Refuses to start without OAuth config UNLESS MCP_DEV_INSECURE=1 is set.
-    Refuses to bind a non-loopback host without MCP_DEV_INSECURE=1 (Phase 2).
-    """
     if host not in ("127.0.0.1", "::1", "localhost") and not is_dev_insecure():
         raise SystemExit(
             f"Refusing to bind {host!r} without MCP_DEV_INSECURE=1. "
@@ -98,15 +122,20 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
 
     if is_dev_insecure():
         oauth_config = None
+        keystore = None
     else:
         try:
             oauth_config = load_oauth_config_from_env()
         except MissingOAuthConfigError as e:
             raise SystemExit(str(e))
+        try:
+            keystore = build_keystore_from_env()
+        except MissingKEKError as e:
+            raise SystemExit(str(e))
 
-    app = _build_app(oauth_config)
+    app = _build_app(oauth_config, keystore)
     logger.info(f"Starting HTTP transport on http://{host}:{port}/mcp"
-                + ("  [DEV-INSECURE: no auth]" if oauth_config is None else ""))
+                + ("  [DEV-INSECURE: no auth, no keystore]" if oauth_config is None else ""))
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

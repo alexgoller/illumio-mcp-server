@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import os
 import json
 import logging
@@ -68,6 +69,33 @@ def _get_stdio_context() -> ToolContext:
     if _stdio_ctx is None:
         _stdio_ctx = _build_stdio_context()
     return _stdio_ctx
+
+
+_http_context: contextvars.ContextVar["ToolContext | None"] = contextvars.ContextVar(
+    "_http_context", default=None
+)
+
+
+def get_active_context() -> ToolContext:
+    """Return the ToolContext for the current call.
+
+    HTTP requests set the ContextVar before invoking the dispatcher; stdio
+    falls through to the singleton.
+    """
+    http_ctx = _http_context.get()
+    if http_ctx is not None:
+        return http_ctx
+    return _get_stdio_context()
+
+
+def set_http_context(ctx: ToolContext) -> contextvars.Token:
+    """HTTP middleware sets the per-request context. Returned token is used to
+    reset() after the request completes."""
+    return _http_context.set(ctx)
+
+
+def reset_http_context(token: contextvars.Token) -> None:
+    _http_context.reset(token)
 
 
 def build_http_context_for(
@@ -3177,7 +3205,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
     spec = TOOL_REGISTRY.get(name)
     if spec is None:
         raise ValueError(f"Unknown tool: {name}")
-    ctx = _get_stdio_context()
+    ctx = get_active_context()
     if spec.requires_pce and ctx.pce is None:
         return [types.TextContent(
             type="text",
