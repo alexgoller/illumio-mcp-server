@@ -70,17 +70,33 @@ def _get_stdio_context() -> ToolContext:
     return _stdio_ctx
 
 
-def build_http_context_for(user_sub: str | None, user_iss: str | None) -> ToolContext:
+def build_http_context_for(
+    user_sub: str | None,
+    user_iss: str | None,
+    keystore: object | None,
+) -> ToolContext:
     """Build a ToolContext for one HTTP request.
 
-    Phase 3a: PCE is still the env-loaded singleton (shared across users).
-    Phase 3b will look up the user's PCE creds from the KeyStore here.
+    Looks up the user's stored PCE credentials in the keystore. If found, builds
+    a fresh PCE client from them. If not found, returns a context with pce=None
+    and lets the dispatcher decide what to allow (credential-management tools
+    are still routable).
     """
+    pce = None
+    if keystore is not None and user_sub and user_iss:
+        try:
+            from .pce import build_pce_for
+            creds = keystore.get(sub=user_sub, iss=user_iss)
+            if creds is not None:
+                pce = build_pce_for(creds)
+        except Exception:
+            logger.exception("Failed to load PCE credentials for user %s", user_sub)
     return ToolContext(
-        pce=get_pce_from_env(),
+        pce=pce,
         is_stdio=False,
         user_sub=user_sub,
         user_iss=user_iss,
+        keystore=keystore,
     )
 
 
@@ -3162,6 +3178,18 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
     if spec is None:
         raise ValueError(f"Unknown tool: {name}")
     ctx = _get_stdio_context()
+    if spec.requires_pce and ctx.pce is None:
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({
+                "error": "no_pce_credentials",
+                "message": (
+                    "No PCE credentials registered for this user. "
+                    "Call `register-pce-credentials` or open the browser setup page."
+                ),
+                "setup_path": "/setup",
+            }, indent=2),
+        )]
     try:
         t0 = time.monotonic()
         result = await asyncio.to_thread(spec.handler, ctx, arguments or {})
