@@ -140,9 +140,11 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     "check-pce-connection":       ToolSpec(handle_check_pce_connection,     roles=ALL_ROLES),
     "get-events":                 ToolSpec(handle_get_events,               roles=ALL_ROLES),
     "get-pairing-profiles":       ToolSpec(handle_get_pairing_profiles,     roles=ALL_ROLES),
-    # Credentials (HTTP mode only; do NOT need ctx.pce)
-    "register-pce-credentials":   ToolSpec(handle_register_pce_credentials,    roles=ALL_ROLES, requires_pce=False),
-    "delete-pce-credentials":     ToolSpec(handle_delete_pce_credentials,      roles=ALL_ROLES, requires_pce=False),
+    # Credentials (HTTP mode only; do NOT need ctx.pce). They mutate
+    # per-user keystore state (not PCE state) — `mutating=True` is honest
+    # about that and keeps the destructive-name guard happy.
+    "register-pce-credentials":   ToolSpec(handle_register_pce_credentials,    roles=ALL_ROLES, requires_pce=False, mutating=True),
+    "delete-pce-credentials":     ToolSpec(handle_delete_pce_credentials,      roles=ALL_ROLES, requires_pce=False, mutating=True),
     "check-pce-credentials-status": ToolSpec(handle_check_pce_credentials_status, roles=ALL_ROLES, requires_pce=False),
 }
 
