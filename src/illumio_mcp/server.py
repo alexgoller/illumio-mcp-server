@@ -10,7 +10,9 @@ import mcp.server.stdio
 import dotenv
 from pathlib import Path
 
-from .tools import TOOL_HANDLERS
+from .context import ToolContext
+from .pce import get_pce_from_env
+from .tools import TOOL_REGISTRY
 
 
 def setup_logging():
@@ -46,6 +48,27 @@ logger = setup_logging()
 logger.debug("Loading environment variables")
 
 dotenv.load_dotenv()
+
+
+def _build_stdio_context() -> ToolContext:
+    """Build the single ToolContext used for the lifetime of the stdio process.
+
+    Stdio mode has one user (the operator who launched the process) and one PCE
+    (built from PCE_* env vars). The ToolContext is created lazily on first use
+    so that test setups can override env before the PCE is constructed.
+    """
+    return ToolContext(pce=get_pce_from_env(), is_stdio=True)
+
+
+_stdio_ctx: ToolContext | None = None
+
+
+def _get_stdio_context() -> ToolContext:
+    global _stdio_ctx
+    if _stdio_ctx is None:
+        _stdio_ctx = _build_stdio_context()
+    return _stdio_ctx
+
 
 server = Server("illumio-mcp")
 logging.debug("Server initialized")
@@ -3121,12 +3144,13 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     logger.debug(f"Tool called: {name} with arguments: {arguments}")
-    handler = TOOL_HANDLERS.get(name)
-    if handler is None:
+    spec = TOOL_REGISTRY.get(name)
+    if spec is None:
         raise ValueError(f"Unknown tool: {name}")
+    ctx = _get_stdio_context()
     try:
         t0 = time.monotonic()
-        result = await asyncio.to_thread(handler, arguments or {})
+        result = await asyncio.to_thread(spec.handler, ctx, arguments or {})
         elapsed = time.monotonic() - t0
         logger.info(f"Tool {name} completed in {elapsed:.2f}s")
         return result
