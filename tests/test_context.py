@@ -53,3 +53,24 @@ def test_tool_context_can_carry_keystore():
     sentinel = object()
     ctx = ToolContext(pce=None, is_stdio=False, user_sub="u", user_iss="i", keystore=sentinel)
     assert ctx.keystore is sentinel
+
+
+def test_tool_context_user_role_default_none():
+    ctx = ToolContext(pce=object(), is_stdio=True)
+    assert ctx.user_role is None
+
+
+def test_tool_context_carries_user_role_audit_request_id():
+    sentinel_audit = object()
+    ctx = ToolContext(
+        pce=None,
+        is_stdio=False,
+        user_sub="u",
+        user_iss="i",
+        user_role="reader",
+        audit_log=sentinel_audit,
+        request_id="req-abc",
+    )
+    assert ctx.user_role == "reader"
+    assert ctx.audit_log is sentinel_audit
+    assert ctx.request_id == "req-abc"
