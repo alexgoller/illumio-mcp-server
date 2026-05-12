@@ -116,3 +116,30 @@ def test_delete_idempotent_on_missing():
     ks = FakeKeyStore()
     body = _parse(handle_delete_pce_credentials(_ctx(ks), {}))
     assert body["status"] == "noop"
+
+
+def _shared_ctx(*, sub="u", iss="i"):
+    """ToolContext as it would look in shared-PCE mode."""
+    sentinel_pce = object()
+    return ToolContext(pce=sentinel_pce, is_stdio=False, user_sub=sub, user_iss=iss,
+                       keystore=None, pce_mode="shared")
+
+
+def test_register_in_shared_mode_returns_error():
+    body = _parse(handle_register_pce_credentials(_shared_ctx(), {
+        "pce_host": "h", "pce_port": 1, "pce_org_id": 1, "api_key": "k", "api_secret": "s",
+    }))
+    assert "error" in body
+    assert "shared" in body["error"].lower()
+
+
+def test_delete_in_shared_mode_returns_error():
+    body = _parse(handle_delete_pce_credentials(_shared_ctx(), {}))
+    assert "error" in body
+    assert "shared" in body["error"].lower()
+
+
+def test_status_in_shared_mode_reports_shared():
+    body = _parse(handle_check_pce_credentials_status(_shared_ctx(), {}))
+    assert body["registered"] is True
+    assert body["mode"] == "shared"

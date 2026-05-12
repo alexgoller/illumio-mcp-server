@@ -29,6 +29,12 @@ def _identity(ctx) -> tuple[str, str] | None:
 
 def handle_register_pce_credentials(ctx, arguments: dict) -> list:
     """Store (or overwrite) the PCE credentials for the current authenticated user."""
+    if getattr(ctx, "pce_mode", "per_user") == "shared":
+        return _err(
+            "Server is running in shared-PCE-key mode; per-user PCE credentials "
+            "are not used. Contact your operator to switch to per_user mode if you "
+            "need to register your own PCE key."
+        )
     if ctx.keystore is None:
         return _err("Keystore not available — server not running in HTTP mode with auth enabled.")
     ident = _identity(ctx)
@@ -62,6 +68,12 @@ def handle_register_pce_credentials(ctx, arguments: dict) -> list:
 
 def handle_delete_pce_credentials(ctx, arguments: dict) -> list:
     """Remove the current user's PCE credentials. Idempotent."""
+    if getattr(ctx, "pce_mode", "per_user") == "shared":
+        return _err(
+            "Server is running in shared-PCE-key mode; per-user PCE credentials "
+            "are not used. Contact your operator to switch to per_user mode if you "
+            "need to register your own PCE key."
+        )
     if ctx.keystore is None:
         return _err("Keystore not available.")
     ident = _identity(ctx)
@@ -80,6 +92,12 @@ def handle_delete_pce_credentials(ctx, arguments: dict) -> list:
 
 def handle_check_pce_credentials_status(ctx, arguments: dict) -> list:
     """Tell the caller whether credentials are registered (without revealing them)."""
+    if getattr(ctx, "pce_mode", "per_user") == "shared":
+        return [types.TextContent(type="text", text=json.dumps({
+            "registered": True,
+            "mode": "shared",
+            "message": "Server is in shared-PCE-key mode; the operator-configured PCE service account is used.",
+        }))]
     if ctx.keystore is None:
         return _err("Keystore not available.")
     ident = _identity(ctx)
