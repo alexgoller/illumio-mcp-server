@@ -145,6 +145,63 @@ Other credential tools:
 - `check-pce-credentials-status` — does this user have credentials registered?
 - `delete-pce-credentials` — remove this user's credentials.
 
+### Role-based authorization (Phase 3c)
+
+The server maps each user's IdP groups to one of three internal roles:
+**reader**, **operator**, **admin**. Per-tool authorization is enforced by the
+dispatcher using the `roles` metadata on each `ToolSpec`.
+
+Configure group → role mapping via env (comma-separated):
+
+```bash
+# A user matching ANY of these groups gets that role; highest role wins.
+export MCP_ROLE_GROUPS_ADMIN=sg-illumio-mcp-admin
+export MCP_ROLE_GROUPS_OPERATOR=sg-illumio-mcp-operator,sg-illumio-mcp-admin
+export MCP_ROLE_GROUPS_READER=sg-illumio-mcp-readonly,sg-illumio-mcp-operator,sg-illumio-mcp-admin
+
+# Optional: fallback role when no group matches. Leave unset to refuse.
+# export MCP_ROLE_DEFAULT=reader
+```
+
+Tool-by-tool defaults:
+
+| Tool category | Roles allowed | Examples |
+|---|---|---|
+| Reads | reader, operator, admin | `get-labels`, `get-workloads`, `get-traffic-flows` |
+| Writes | operator, admin | `create-*`, `update-*`, `delete-*` |
+| Provisioning + bulk | admin | `provision-policy`, `ringfence-batch` |
+
+A user without a matching role (and no `MCP_ROLE_DEFAULT`) receives a structured
+`forbidden_no_role` error.
+
+### Audit log (Phase 3c)
+
+Every dispatcher decision (allow / deny / error) is written to a SQLite audit
+database. Schema and storage location:
+
+```bash
+# Defaults to <keystore_dir>/audit.db
+export MCP_AUDIT_LOG_PATH=/var/lib/illumio-mcp/audit.db
+```
+
+Audit rows include `(ts, sub, iss, tool, decision, reason, role, request_id)`
+— **never** tool arguments. The `request_id` matches the `X-Request-Id`
+response header so external traces can be correlated.
+
+Query examples:
+
+```sql
+-- Recent denied calls per user
+SELECT ts, sub, tool, reason FROM audit_log
+WHERE decision='denied'
+ORDER BY ts DESC LIMIT 20;
+
+-- Tool-call volume by user
+SELECT sub, COUNT(*) FROM audit_log
+WHERE ts > date('now', '-7 days')
+GROUP BY sub ORDER BY 2 DESC;
+```
+
 ## Tools
 
 ### Workload Management
