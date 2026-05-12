@@ -169,7 +169,7 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
 
         traffic_query = TrafficQuery.build(**query_kwargs)
         flows = pce.get_traffic_flows_async(query_name='compliance-check', traffic_query=traffic_query)
-        df = to_dataframe(flows)
+        df = to_dataframe(pce, flows)
 
         # Run compliance checks
         findings = []
@@ -397,8 +397,8 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
         )
         outbound_flows = pce.get_traffic_flows_async(query_name='readiness-outbound', traffic_query=traffic_query_out)
 
-        inbound_df = to_dataframe(inbound_flows)
-        outbound_df = to_dataframe(outbound_flows)
+        inbound_df = to_dataframe(pce, inbound_flows)
+        outbound_df = to_dataframe(pce, outbound_flows)
 
         # Analyze policy decisions
         policy_stats = {"allowed": 0, "potentially_blocked": 0, "blocked": 0, "unknown": 0}
@@ -568,8 +568,8 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
         )
         outbound_flows = pce.get_traffic_flows_async(query_name='coverage-outbound', traffic_query=traffic_query_out)
 
-        inbound_df = to_dataframe(inbound_flows)
-        outbound_df = to_dataframe(outbound_flows)
+        inbound_df = to_dataframe(pce, inbound_flows)
+        outbound_df = to_dataframe(pce, outbound_flows)
 
         # Analyze by policy decision
         def analyze_coverage(df, direction):

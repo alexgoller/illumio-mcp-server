@@ -125,8 +125,8 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         )
 
         # Step 5: Convert flows to dataframes and group by app+env
-        inbound_df = to_dataframe(inbound_flows)
-        outbound_df = to_dataframe(outbound_flows)
+        inbound_df = to_dataframe(pce, inbound_flows)
+        outbound_df = to_dataframe(pce, outbound_flows)
 
         remote_apps_inbound = {}  # key: (app_value, env_value) -> list of {port, proto, connections}
         remote_apps_outbound = {}
@@ -625,7 +625,7 @@ def handle_identify_infrastructure_services(ctx, arguments: dict) -> list:
                 "lookback_days": lookback_days
             }, indent=2))]
 
-        df = to_dataframe(flows)
+        df = to_dataframe(pce, flows)
 
         if df.empty or 'src_app' not in df.columns or 'dst_app' not in df.columns:
             return [types.TextContent(type="text", text=json.dumps({
@@ -877,7 +877,7 @@ def handle_detect_lateral_movement_paths(ctx, arguments: dict) -> list:
         )
 
         flows = pce.get_traffic_flows_async(query_name='lateral-movement', traffic_query=traffic_query)
-        df = to_dataframe(flows)
+        df = to_dataframe(pce, flows)
 
         if df.empty or 'src_app' not in df.columns or 'dst_app' not in df.columns:
             return [types.TextContent(type="text", text=json.dumps({
