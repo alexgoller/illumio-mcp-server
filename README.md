@@ -202,6 +202,51 @@ WHERE ts > date('now', '-7 days')
 GROUP BY sub ORDER BY 2 DESC;
 ```
 
+### Confirm tokens for mutating tools (Phase 3d)
+
+Tools marked `requires_confirm=True` (currently `provision-policy`,
+`ringfence-batch`, `register-pce-credentials`, `delete-pce-credentials`) require
+a server-issued single-use confirm token in `params._meta.confirm_token` when
+called over HTTP. Stdio mode is unaffected — the operator who launched the
+process can call mutating tools directly.
+
+Required env in auth mode:
+
+```bash
+export MCP_CONFIRM_HMAC_KEY=$(python -c 'import os, base64; print(base64.b64encode(os.urandom(32)).decode())')
+# Optional:
+# export MCP_CONFIRM_TTL_SECONDS=120
+# export MCP_CONFIRM_JTI_PATH=/var/lib/illumio-mcp/jti.db
+# export MCP_CONFIRM_FRESH_AUTH_SECONDS=300   # require JWT auth_time within 5 min
+```
+
+#### How a client uses it
+
+1. Call the mutating tool without a token → server returns:
+   ```json
+   {"error": "confirm_required", "params_hash": "<sha256>", "message": "..."}
+   ```
+2. Call `POST /confirm` with the JWT and the params_hash:
+   ```bash
+   curl -X POST https://mcp.illumio.example/confirm \
+     -H "Authorization: Bearer $JWT" \
+     -H "Content-Type: application/json" \
+     -d '{"tool":"provision-policy","params_hash":"<sha256>"}'
+   # → {"confirm_token": "...", "expires_in": 120}
+   ```
+3. Re-call the tool with the token in `params._meta.confirm_token`.
+
+Tokens are **single-use** (replays return `confirm_token_replay`) and **scoped**
+to `(sub, tool, params_hash)`. Tampering with any field invalidates the token.
+
+#### Step-up auth (optional, recommended for production)
+
+Set `MCP_CONFIRM_FRESH_AUTH_SECONDS=300` to require the JWT's `auth_time`
+claim to be within the last 5 minutes. Forces the user to re-authenticate
+before minting a token — the strongest prompt-injection defense available
+without an interactive session model. Requires the IdP to issue `auth_time`
+(Entra and Okta both do for OIDC sign-in flows).
+
 ## Tools
 
 ### Workload Management
