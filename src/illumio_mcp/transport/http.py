@@ -40,6 +40,9 @@ from ..auth.crypto import MissingKEKError
 from ..auth.roles import RoleConfig, load_role_config_from_env, map_user_role
 from ..auth.audit_init import build_audit_log_from_env
 from ..auth.audit import NullAuditLog
+from ..auth.confirm import ConfirmTokenManager, MissingConfirmHmacKeyError
+from ..auth.confirm_init import build_confirm_manager_from_env
+from ..auth.confirm_replay import NullJtiStore
 from ..server import (
     server as mcp_server,
     build_http_context_for,
@@ -48,6 +51,7 @@ from ..server import (
 )
 from .request_id import RequestIdMiddleware
 from .setup_page import build_setup_routes
+from .confirm_endpoint import build_confirm_routes
 
 logger = logging.getLogger("illumio_mcp.transport.http")
 
@@ -56,7 +60,7 @@ def _build_session_manager() -> StreamableHTTPSessionManager:
     return StreamableHTTPSessionManager(app=mcp_server, stateless=True)
 
 
-def _wrap_with_per_request_context(handle_request, keystore, role_config, audit_log):
+def _wrap_with_per_request_context(handle_request, keystore, role_config, audit_log, confirm_manager, jti_store):
     """Wrap the session manager's ASGI handler so it sets the per-request
     ToolContext (built from the authenticated user) before invoking MCP."""
     async def app(scope, receive, send):
@@ -70,7 +74,10 @@ def _wrap_with_per_request_context(handle_request, keystore, role_config, audit_
         groups = getattr(user, "groups", []) if user else []
         role = map_user_role(groups, role_config) if role_config is not None else "admin"
         request_id = state.get("request_id")
-        ctx = build_http_context_for(sub, iss, keystore, role, audit_log, request_id)
+        ctx = build_http_context_for(
+            sub, iss, keystore, role, audit_log, request_id,
+            confirm_manager=confirm_manager, jti_store=jti_store,
+        )
         token = set_http_context(ctx)
         try:
             await handle_request(scope, receive, send)
@@ -84,6 +91,8 @@ def _build_app(
     keystore: object | None,
     role_config: RoleConfig | None,
     audit_log: object | None,
+    confirm_manager: object | None,
+    jti_store: object | None,
 ) -> Starlette:
     session_manager = _build_session_manager()
 
@@ -102,6 +111,7 @@ def _build_app(
 
     mcp_handler = _wrap_with_per_request_context(
         session_manager.handle_request, keystore, role_config, audit_log,
+        confirm_manager, jti_store,
     )
     routes = [
         Mount("/mcp", app=mcp_handler),
@@ -116,6 +126,8 @@ def _build_app(
         routes.append(Route("/.well-known/oauth-protected-resource", prm, methods=["GET"]))
         if keystore is not None:
             routes.extend(build_setup_routes(keystore))
+        if confirm_manager is not None:
+            routes.extend(build_confirm_routes(confirm_manager, audit_log))
 
         validator = JWTValidator(oauth_config)
         middleware.append(Middleware(JWTAuthMiddleware, validator=validator, config=oauth_config))
@@ -137,6 +149,8 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
         keystore = None
         role_config = None
         audit_log = NullAuditLog()
+        confirm_manager = None
+        jti_store = None
     else:
         try:
             oauth_config = load_oauth_config_from_env()
@@ -148,11 +162,15 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
             raise SystemExit(str(e))
         role_config = load_role_config_from_env()
         audit_log = build_audit_log_from_env()
+        try:
+            confirm_manager, jti_store = build_confirm_manager_from_env()
+        except MissingConfirmHmacKeyError as e:
+            raise SystemExit(str(e))
 
-    app = _build_app(oauth_config, keystore, role_config, audit_log)
+    app = _build_app(oauth_config, keystore, role_config, audit_log, confirm_manager, jti_store)
     extras = []
     if oauth_config is None:
-        extras.append("DEV-INSECURE: no auth, no keystore, admin role")
+        extras.append("DEV-INSECURE: no auth, no keystore, admin role, no confirm")
     logger.info(f"Starting HTTP transport on http://{host}:{port}/mcp"
                 + (f"  [{'; '.join(extras)}]" if extras else ""))
     uvicorn.run(app, host=host, port=port, log_level="info")

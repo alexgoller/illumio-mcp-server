@@ -38,7 +38,7 @@ def http_server_url():
 
     port = _free_port()
     from illumio_mcp.auth.audit import NullAuditLog
-    config = uvicorn.Config(_build_app(None, None, None, NullAuditLog()), host="127.0.0.1", port=port, log_level="warning")
+    config = uvicorn.Config(_build_app(None, None, None, NullAuditLog(), None, None), host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
     thread = threading.Thread(target=server.run, daemon=True)
