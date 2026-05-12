@@ -36,3 +36,20 @@ def test_tool_context_can_carry_authenticated_user():
     ctx = ToolContext(pce=object(), is_stdio=False, user_sub="user-42", user_iss="https://idp")
     assert ctx.user_sub == "user-42"
     assert ctx.user_iss == "https://idp"
+
+
+def test_tool_context_pce_can_be_none():
+    """A user without registered PCE creds gets ctx.pce=None."""
+    ctx = ToolContext(pce=None, is_stdio=False, user_sub="u", user_iss="i")
+    assert ctx.pce is None
+
+
+def test_tool_context_keystore_default_none():
+    ctx = ToolContext(pce=object(), is_stdio=True)
+    assert ctx.keystore is None
+
+
+def test_tool_context_can_carry_keystore():
+    sentinel = object()
+    ctx = ToolContext(pce=None, is_stdio=False, user_sub="u", user_iss="i", keystore=sentinel)
+    assert ctx.keystore is sentinel

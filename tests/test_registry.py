@@ -40,3 +40,13 @@ def test_toolspec_requires_confirm_implies_mutating():
     so a typo can't silently expose a confirm-required-but-not-mutating tool."""
     with pytest.raises(ValueError, match="mutating"):
         ToolSpec(handler=_h, roles={ADMIN}, requires_confirm=True)
+
+
+def test_toolspec_requires_pce_default_true():
+    spec = ToolSpec(handler=_h, roles={ADMIN})
+    assert spec.requires_pce is True
+
+
+def test_toolspec_can_opt_out_of_pce():
+    spec = ToolSpec(handler=_h, roles={ADMIN}, requires_pce=False)
+    assert spec.requires_pce is False
