@@ -130,6 +130,9 @@ def build_http_context_for(
                 pce = build_pce_for(creds)
         except Exception:
             logger.exception("Failed to load PCE credentials for user %s", user_sub)
+    elif keystore is None:
+        # Dev-insecure mode: no keystore, fall back to env-loaded PCE (same as stdio)
+        pce = get_pce_from_env()
     return ToolContext(
         pce=pce,
         is_stdio=False,
@@ -3209,6 +3212,39 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                     "name": {"type": "string", "description": "Filter by pairing profile name (partial match)"},
                     "max_results": {"type": "integer", "description": "Maximum results to return (default 50)"},
                 },
+            }
+        ),
+        types.Tool(
+            name="register-pce-credentials",
+            description="Register (or overwrite) PCE credentials for the current authenticated user. After registering, all PCE tools become available in this session.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pce_host": {"type": "string", "description": "PCE hostname or IP address"},
+                    "pce_port": {"type": "integer", "description": "PCE API port (typically 443 or 8443)"},
+                    "pce_org_id": {"type": "integer", "description": "PCE organisation ID"},
+                    "api_key": {"type": "string", "description": "PCE API key name"},
+                    "api_secret": {"type": "string", "description": "PCE API key secret"},
+                    "tls_verify": {"type": "boolean", "description": "Verify TLS certificates (default true)"},
+                    "label": {"type": "string", "description": "Optional human-readable label for this credential set"},
+                },
+                "required": ["pce_host", "pce_port", "pce_org_id", "api_key", "api_secret"],
+            }
+        ),
+        types.Tool(
+            name="delete-pce-credentials",
+            description="Remove the current user's stored PCE credentials. Idempotent — safe to call even if no credentials are stored.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            }
+        ),
+        types.Tool(
+            name="check-pce-credentials-status",
+            description="Check whether PCE credentials are registered for the current user without revealing the secret values.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
             }
         ),
     ]
