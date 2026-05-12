@@ -43,6 +43,7 @@ from ..auth.audit import NullAuditLog
 from ..auth.confirm import ConfirmTokenManager, MissingConfirmHmacKeyError
 from ..auth.confirm_init import build_confirm_manager_from_env
 from ..auth.confirm_replay import NullJtiStore
+from ..auth.pce_mode import load_pce_mode_from_env, is_shared_mode
 from ..server import (
     server as mcp_server,
     build_http_context_for,
@@ -60,7 +61,7 @@ def _build_session_manager() -> StreamableHTTPSessionManager:
     return StreamableHTTPSessionManager(app=mcp_server, stateless=True)
 
 
-def _wrap_with_per_request_context(handle_request, keystore, role_config, audit_log, confirm_manager, jti_store):
+def _wrap_with_per_request_context(handle_request, keystore, role_config, audit_log, confirm_manager, jti_store, pce_mode):
     """Wrap the session manager's ASGI handler so it sets the per-request
     ToolContext (built from the authenticated user) before invoking MCP."""
     async def app(scope, receive, send):
@@ -77,6 +78,7 @@ def _wrap_with_per_request_context(handle_request, keystore, role_config, audit_
         ctx = build_http_context_for(
             sub, iss, keystore, role, audit_log, request_id,
             confirm_manager=confirm_manager, jti_store=jti_store,
+            pce_mode=pce_mode,
         )
         token = set_http_context(ctx)
         try:
@@ -93,6 +95,7 @@ def _build_app(
     audit_log: object | None,
     confirm_manager: object | None,
     jti_store: object | None,
+    pce_mode: str = "per_user",
 ) -> Starlette:
     session_manager = _build_session_manager()
 
@@ -111,7 +114,7 @@ def _build_app(
 
     mcp_handler = _wrap_with_per_request_context(
         session_manager.handle_request, keystore, role_config, audit_log,
-        confirm_manager, jti_store,
+        confirm_manager, jti_store, pce_mode,
     )
     routes = [
         Mount("/mcp", app=mcp_handler),
@@ -124,7 +127,8 @@ def _build_app(
         async def prm(_: Request) -> Response:
             return JSONResponse(build_prm_document(oauth_config))
         routes.append(Route("/.well-known/oauth-protected-resource", prm, methods=["GET"]))
-        if keystore is not None:
+        # /setup only makes sense in per_user mode (it writes to the keystore)
+        if keystore is not None and not is_shared_mode(pce_mode):
             routes.extend(build_setup_routes(keystore))
         if confirm_manager is not None:
             routes.extend(build_confirm_routes(confirm_manager, audit_log))
@@ -151,15 +155,27 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
         audit_log = NullAuditLog()
         confirm_manager = None
         jti_store = None
+        pce_mode = "per_user"  # irrelevant in dev-insecure
     else:
         try:
             oauth_config = load_oauth_config_from_env()
         except MissingOAuthConfigError as e:
             raise SystemExit(str(e))
-        try:
-            keystore = build_keystore_from_env()
-        except MissingKEKError as e:
-            raise SystemExit(str(e))
+        pce_mode = load_pce_mode_from_env()
+        if is_shared_mode(pce_mode):
+            # Shared-key mode: no keystore, no MCP_KEK required.
+            # Verify the env vars stdio uses are present; fail-fast otherwise.
+            for required in ("PCE_HOST", "PCE_PORT", "PCE_ORG_ID", "API_KEY", "API_SECRET"):
+                if not os.getenv(required):
+                    raise SystemExit(
+                        f"MCP_PCE_MODE=shared requires {required} env var (same vars stdio uses)."
+                    )
+            keystore = None
+        else:
+            try:
+                keystore = build_keystore_from_env()
+            except MissingKEKError as e:
+                raise SystemExit(str(e))
         role_config = load_role_config_from_env()
         audit_log = build_audit_log_from_env()
         try:
@@ -167,10 +183,12 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
         except MissingConfirmHmacKeyError as e:
             raise SystemExit(str(e))
 
-    app = _build_app(oauth_config, keystore, role_config, audit_log, confirm_manager, jti_store)
+    app = _build_app(oauth_config, keystore, role_config, audit_log, confirm_manager, jti_store, pce_mode)
     extras = []
     if oauth_config is None:
         extras.append("DEV-INSECURE: no auth, no keystore, admin role, no confirm")
+    elif is_shared_mode(pce_mode):
+        extras.append("PCE-MODE: shared (single service account)")
     logger.info(f"Starting HTTP transport on http://{host}:{port}/mcp"
                 + (f"  [{'; '.join(extras)}]" if extras else ""))
     uvicorn.run(app, host=host, port=port, log_level="info")
