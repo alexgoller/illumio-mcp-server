@@ -74,3 +74,20 @@ def test_tool_context_carries_user_role_audit_request_id():
     assert ctx.user_role == "reader"
     assert ctx.audit_log is sentinel_audit
     assert ctx.request_id == "req-abc"
+
+
+def test_tool_context_confirm_fields_default_none():
+    ctx = ToolContext(pce=object(), is_stdio=True)
+    assert ctx.confirm_manager is None
+    assert ctx.jti_store is None
+
+
+def test_tool_context_carries_confirm_fields():
+    sentinel_mgr = object()
+    sentinel_jti = object()
+    ctx = ToolContext(
+        pce=None, is_stdio=False, user_sub="u", user_iss="i",
+        confirm_manager=sentinel_mgr, jti_store=sentinel_jti,
+    )
+    assert ctx.confirm_manager is sentinel_mgr
+    assert ctx.jti_store is sentinel_jti
