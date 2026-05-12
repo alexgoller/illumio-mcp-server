@@ -20,13 +20,13 @@ _FORM_HTML = """\
 <html><head>
 <title>Illumio MCP - Register PCE Credentials</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 540px; margin: 3em auto; padding: 0 1em; color: #222; }
-  h1 { font-size: 1.4em; margin-bottom: 0.2em; }
-  .meta { color: #666; font-size: 0.9em; margin-bottom: 2em; }
-  label { display: block; margin-top: 1em; font-weight: 600; }
-  input { width: 100%; padding: 0.5em; font-size: 1em; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
-  button { margin-top: 2em; padding: 0.7em 1.5em; font-size: 1em; background: #1f6feb; color: white; border: 0; border-radius: 4px; cursor: pointer; }
-  .note { background: #fff3cd; padding: 1em; border-radius: 4px; font-size: 0.9em; margin-top: 1em; }
+  body {{ font-family: system-ui, sans-serif; max-width: 540px; margin: 3em auto; padding: 0 1em; color: #222; }}
+  h1 {{ font-size: 1.4em; margin-bottom: 0.2em; }}
+  .meta {{ color: #666; font-size: 0.9em; margin-bottom: 2em; }}
+  label {{ display: block; margin-top: 1em; font-weight: 600; }}
+  input {{ width: 100%; padding: 0.5em; font-size: 1em; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }}
+  button {{ margin-top: 2em; padding: 0.7em 1.5em; font-size: 1em; background: #1f6feb; color: white; border: 0; border-radius: 4px; cursor: pointer; }}
+  .note {{ background: #fff3cd; padding: 1em; border-radius: 4px; font-size: 0.9em; margin-top: 1em; }}
 </style>
 </head><body>
 <h1>Register PCE Credentials</h1>
