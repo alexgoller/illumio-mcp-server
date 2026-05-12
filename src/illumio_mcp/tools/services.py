@@ -1,12 +1,11 @@
 import json
 import logging
 import mcp.types as types
-from ..pce import get_pce
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_get_services(arguments: dict) -> list:
+def handle_get_services(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET SERVICES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -14,7 +13,7 @@ def handle_get_services(arguments: dict) -> list:
 
     try:
         logger.debug("Initializing PCE connection...")
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {}
         for param in ['name', 'description', 'port', 'proto', 'process_name', 'max_results']:
@@ -100,10 +99,10 @@ def handle_get_services(arguments: dict) -> list:
         )]
 
 
-def handle_create_service(arguments: dict) -> list:
+def handle_create_service(ctx, arguments: dict) -> list:
     logger.debug(f"CREATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         payload = {
             "name": arguments["name"],
@@ -125,10 +124,10 @@ def handle_create_service(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_update_service(arguments: dict) -> list:
+def handle_update_service(ctx, arguments: dict) -> list:
     logger.debug(f"UPDATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         # Find service by href or name
         service_href = None
@@ -170,10 +169,10 @@ def handle_update_service(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_delete_service(arguments: dict) -> list:
+def handle_delete_service(ctx, arguments: dict) -> list:
     logger.debug(f"DELETE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         service_href = None
         if arguments.get("href"):
