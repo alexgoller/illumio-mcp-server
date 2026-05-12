@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import os
 import json
 import logging
@@ -13,6 +14,7 @@ from pathlib import Path
 from .context import ToolContext
 from .pce import get_pce_from_env
 from .tools import TOOL_REGISTRY
+from .auth.audit import AuditEntry, NullAuditLog
 
 
 def setup_logging():
@@ -56,8 +58,16 @@ def _build_stdio_context() -> ToolContext:
     Stdio mode has one user (the operator who launched the process) and one PCE
     (built from PCE_* env vars). The ToolContext is created lazily on first use
     so that test setups can override env before the PCE is constructed.
+
+    Stdio gets user_role="admin" and a NullAuditLog so the dispatcher can apply
+    uniform role + audit logic without special-casing the transport.
     """
-    return ToolContext(pce=get_pce_from_env(), is_stdio=True)
+    return ToolContext(
+        pce=get_pce_from_env(),
+        is_stdio=True,
+        user_role="admin",
+        audit_log=NullAuditLog(),
+    )
 
 
 _stdio_ctx: ToolContext | None = None
@@ -68,6 +78,83 @@ def _get_stdio_context() -> ToolContext:
     if _stdio_ctx is None:
         _stdio_ctx = _build_stdio_context()
     return _stdio_ctx
+
+
+_http_context: contextvars.ContextVar["ToolContext | None"] = contextvars.ContextVar(
+    "_http_context", default=None
+)
+
+
+def get_active_context() -> ToolContext:
+    """Return the ToolContext for the current call.
+
+    HTTP requests set the ContextVar before invoking the dispatcher; stdio
+    falls through to the singleton.
+    """
+    http_ctx = _http_context.get()
+    if http_ctx is not None:
+        return http_ctx
+    return _get_stdio_context()
+
+
+def set_http_context(ctx: ToolContext) -> contextvars.Token:
+    """HTTP middleware sets the per-request context. Returned token is used to
+    reset() after the request completes."""
+    return _http_context.set(ctx)
+
+
+def reset_http_context(token: contextvars.Token) -> None:
+    _http_context.reset(token)
+
+
+def build_http_context_for(
+    user_sub: str | None,
+    user_iss: str | None,
+    keystore: object | None,
+    user_role: str | None,
+    audit_log: object | None,
+    request_id: str | None,
+    confirm_manager: object | None = None,
+    jti_store: object | None = None,
+    pce_mode: str = "per_user",
+) -> ToolContext:
+    """Build a ToolContext for one HTTP request.
+
+    In `per_user` mode (default), looks up the user's PCE creds in the keystore.
+    In `shared` mode, every request uses the env-loaded PCE singleton — no
+    keystore lookup, no per-user PCE attribution.
+    """
+    if pce_mode == "shared":
+        # Shared service-account mode: every authenticated user uses the same
+        # env-loaded PCE. SSO + role + audit + confirm still enforced.
+        pce = get_pce_from_env()
+    else:
+        # per_user mode (Phase 3b)
+        pce = None
+        if keystore is not None and user_sub and user_iss:
+            try:
+                from .pce import build_pce_for
+                creds = keystore.get(sub=user_sub, iss=user_iss)
+                if creds is not None:
+                    pce = build_pce_for(creds)
+            except Exception:
+                logger.exception("Failed to load PCE credentials for user %s", user_sub)
+        elif keystore is None:
+            # Dev-insecure mode: no keystore, fall back to env-loaded PCE
+            pce = get_pce_from_env()
+    return ToolContext(
+        pce=pce,
+        is_stdio=False,
+        user_sub=user_sub,
+        user_iss=user_iss,
+        keystore=keystore,
+        user_role=user_role,
+        audit_log=audit_log,
+        request_id=request_id,
+        confirm_manager=confirm_manager,
+        jti_store=jti_store,
+        pce_mode=pce_mode,
+    )
 
 
 server = Server("illumio-mcp")
@@ -3139,6 +3226,39 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                 },
             }
         ),
+        types.Tool(
+            name="register-pce-credentials",
+            description="Register (or overwrite) PCE credentials for the current authenticated user. After registering, all PCE tools become available in this session.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pce_host": {"type": "string", "description": "PCE hostname or IP address"},
+                    "pce_port": {"type": "integer", "description": "PCE API port (typically 443 or 8443)"},
+                    "pce_org_id": {"type": "integer", "description": "PCE organisation ID"},
+                    "api_key": {"type": "string", "description": "PCE API key name"},
+                    "api_secret": {"type": "string", "description": "PCE API key secret"},
+                    "tls_verify": {"type": "boolean", "description": "Verify TLS certificates (default true)"},
+                    "label": {"type": "string", "description": "Optional human-readable label for this credential set"},
+                },
+                "required": ["pce_host", "pce_port", "pce_org_id", "api_key", "api_secret"],
+            }
+        ),
+        types.Tool(
+            name="delete-pce-credentials",
+            description="Remove the current user's stored PCE credentials. Idempotent — safe to call even if no credentials are stored.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            }
+        ),
+        types.Tool(
+            name="check-pce-credentials-status",
+            description="Check whether PCE credentials are registered for the current user without revealing the secret values.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -3147,16 +3267,104 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
     spec = TOOL_REGISTRY.get(name)
     if spec is None:
         raise ValueError(f"Unknown tool: {name}")
-    ctx = _get_stdio_context()
+    ctx = get_active_context()
+    audit = ctx.audit_log or NullAuditLog()
+
+    def _audit(decision: str, reason: str | None) -> None:
+        audit.record(AuditEntry(
+            sub=ctx.user_sub,
+            iss=ctx.user_iss,
+            tool=name,
+            decision=decision,
+            reason=reason,
+            role=ctx.user_role,
+            request_id=ctx.request_id,
+        ))
+
+    # Role check
+    if ctx.user_role is None:
+        _audit("denied", "no role assigned")
+        return [types.TextContent(type="text", text=json.dumps({
+            "error": "forbidden_no_role",
+            "message": "Your user has no role mapping configured on this server.",
+        }, indent=2))]
+    if ctx.user_role not in spec.roles:
+        _audit("denied", f"role {ctx.user_role!r} not in {sorted(spec.roles)}")
+        return [types.TextContent(type="text", text=json.dumps({
+            "error": "forbidden",
+            "message": f"Role {ctx.user_role!r} is not permitted to call {name!r}.",
+            "allowed_roles": sorted(spec.roles),
+        }, indent=2))]
+
+    # PCE-presence check (Phase 3b)
+    if spec.requires_pce and ctx.pce is None:
+        _audit("denied", "no_pce_credentials")
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({
+                "error": "no_pce_credentials",
+                "message": (
+                    "No PCE credentials registered for this user. "
+                    "Call `register-pce-credentials` or open the browser setup page."
+                ),
+                "setup_path": "/setup",
+            }, indent=2),
+        )]
+
+    # Confirm-token check (Phase 3d) — only enforced over HTTP
+    if spec.requires_confirm and not ctx.is_stdio:
+        from .auth.confirm import canonical_params_hash, InvalidConfirmTokenError
+        meta = (arguments or {}).get("_meta") or {}
+        confirm_token = meta.get("confirm_token") if isinstance(meta, dict) else None
+        if not confirm_token:
+            _audit("denied", "missing_confirm_token")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "confirm_required",
+                "message": (
+                    f"Tool {name!r} requires a confirm token. "
+                    f"POST /confirm with {{\"tool\":\"{name}\",\"params_hash\":\"<sha256>\"}} "
+                    "to mint one, then re-call the tool with the token in params._meta.confirm_token."
+                ),
+                "params_hash": canonical_params_hash({k: v for k, v in (arguments or {}).items() if k != "_meta"}),
+            }, indent=2))]
+        if ctx.confirm_manager is None or ctx.jti_store is None:
+            _audit("denied", "confirm_not_configured")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "server_misconfigured",
+                "message": "Confirm-token enforcement is requested but the server has no manager configured.",
+            }, indent=2))]
+        params_for_hash = {k: v for k, v in (arguments or {}).items() if k != "_meta"}
+        try:
+            claims = ctx.confirm_manager.verify(
+                confirm_token,
+                sub=ctx.user_sub or "",
+                tool=name,
+                params_hash=canonical_params_hash(params_for_hash),
+            )
+        except InvalidConfirmTokenError as e:
+            _audit("denied", f"invalid_confirm_token: {e}")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "invalid_confirm_token",
+                "message": str(e),
+            }, indent=2))]
+        if not ctx.jti_store.mark_used(claims.jti, exp=claims.exp):
+            _audit("denied", "confirm_token_replay")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "confirm_token_replay",
+                "message": "This confirm token has already been used. Mint a fresh one.",
+            }, indent=2))]
+
     try:
         t0 = time.monotonic()
         result = await asyncio.to_thread(spec.handler, ctx, arguments or {})
         elapsed = time.monotonic() - t0
         logger.info(f"Tool {name} completed in {elapsed:.2f}s")
+        _audit("allowed", None)
         return result
     except Exception as e:
         error_msg = f"Tool {name} failed: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        _audit("error", str(e)[:200])
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 async def run_stdio() -> None:

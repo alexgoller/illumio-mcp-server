@@ -75,30 +75,215 @@ Add the following to the `custom_settings` section:
 }
 ```
 
-## HTTP transport (preview)
+## HTTP transport with OAuth Resource Server (Phase 3a)
 
-The server can also run over HTTP using the MCP Streamable HTTP transport
-(spec rev 2025-03-26). This is **Phase 2** of the multi-user rollout: the HTTP
-path is wired up but **there is no authentication yet** — anyone who can reach
-the port can use any PCE credentials configured on the server. Phase 3 adds
-OAuth + per-user PCE keys.
+The server runs over HTTP using the MCP Streamable HTTP transport (spec rev
+2025-03-26) and validates OAuth 2.1 bearer tokens issued by your IdP. This is
+**Phase 3a**: identity is enforced; per-user PCE keys land in Phase 3b.
 
-Start the server:
+### Running with auth (production-shaped)
 
 ```bash
-illumio-mcp-http                                       # 127.0.0.1:8080
-# or
-python -m illumio_mcp serve --http --port 8765
+export MCP_PUBLIC_URL=https://mcp.illumio.example
+export MCP_OAUTH_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+export MCP_OAUTH_JWKS_URL=https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys
+export MCP_OAUTH_AUDIENCE=https://mcp.illumio.example
+export MCP_OAUTH_REQUIRED_SCOPE=illumio-mcp.use   # default; override if needed
+illumio-mcp-http --host 127.0.0.1 --port 8080
 ```
 
-Connect from any MCP client (Claude Desktop, ChatGPT desktop, MCP Inspector)
-using the URL `http://127.0.0.1:8080/mcp` and transport "Streamable HTTP".
+The server refuses to start without these env vars (unless `MCP_DEV_INSECURE=1`).
 
-Health endpoints: `GET /healthz` (liveness), `GET /readyz` (readiness).
+MCP clients discover the AS via the standard RFC 9728 endpoint:
 
-**Safety:** the server refuses to bind anything other than `127.0.0.1`/`::1`/`localhost`
-unless `MCP_DEV_INSECURE=1` is set. **Do not run unauthenticated in production.**
-Wait for Phase 3 (OAuth Resource Server + per-user PCE keys).
+```
+GET /.well-known/oauth-protected-resource
+```
+
+Unauthenticated requests to `/mcp` return `401` with
+`WWW-Authenticate: Bearer resource_metadata="<URL>"`, which any spec-compliant
+MCP client (Claude Desktop, ChatGPT, MCP Inspector) follows automatically to
+run PKCE auth code flow against the configured AS.
+
+### Running without auth (dev only)
+
+```bash
+MCP_DEV_INSECURE=1 illumio-mcp-http
+```
+
+The server logs a prominent warning. Do NOT use in production.
+
+### Health endpoints (always unauthenticated)
+
+- `GET /healthz` — liveness
+- `GET /readyz` — readiness (Phase 3a returns the same as healthz; Phase 3b/c will add PCE + JWKS reachability)
+
+### Two PCE modes (Phase 3b vs Phase 3e)
+
+The HTTP server supports two ways to source PCE credentials, selected via
+`MCP_PCE_MODE`:
+
+| Mode | `MCP_PCE_MODE` | PCE creds | Onboarding | PCE-side audit |
+|---|---|---|---|---|
+| **Per-user** (default) | `per_user` | One PCE API key per authenticated user, encrypted in keystore | User registers via `/setup` page or `register-pce-credentials` tool | PCE logs show the real human via per-user API key |
+| **Shared** | `shared` | One PCE service-account key from env (same as stdio) | None — works immediately for any authenticated user | PCE logs show the service account; the MCP audit log is the source of truth for "who did what" |
+
+**Choose per-user when:**
+- You want PCE-side audit attribution to identify the human
+- Users are happy to provide their own PCE API key once
+- You can tolerate the per-user PCE key sprawl (PCE has limits)
+
+**Choose shared when:**
+- The PCE limits API keys per user too aggressively for per-user mode
+- You want zero-friction onboarding (no `/setup` step)
+- You're OK relying on the MCP audit log alone for human-level attribution
+- You operate the PCE service account yourself and rotate it on a schedule
+
+In **shared** mode, `/setup` is not mounted, the credential-management tools
+(`register-pce-credentials`, `delete-pce-credentials`) refuse with a friendly
+error, and `MCP_KEK` is not required. SSO + JWT + role-based authz + audit
+log + confirm tokens all still apply identically.
+
+```bash
+# Shared mode — same env that stdio uses today, plus auth/role config
+export MCP_PCE_MODE=shared
+export PCE_HOST=https://your-pce.example.com
+export PCE_PORT=8443
+export PCE_ORG_ID=1
+export API_KEY=your_pce_api_key_name
+export API_SECRET=your_pce_api_key_secret
+# (other auth/role env vars from earlier sections still apply)
+illumio-mcp-http
+```
+
+### Per-user PCE keys (Phase 3b)
+
+Each authenticated user has their own PCE API key/secret stored in an
+encrypted SQLite keystore. PCE-side audit logs attribute correctly per human;
+revoking a user is a single tool call.
+
+Additional env required when running with auth:
+
+```bash
+export MCP_KEK=$(python -c 'import os, base64; print(base64.b64encode(os.urandom(32)).decode())')
+export MCP_KEYSTORE_PATH=/var/lib/illumio-mcp/keys.db   # default: ./data/keys.db
+```
+
+The KEK is **never** stored next to the database. Loss of KEK = total loss of
+stored creds (intentional, fail-closed). For production, source MCP_KEK from
+KMS or Vault rather than the operator's shell.
+
+Onboarding paths (either works):
+
+1. **Browser** — visit `/setup` after authenticating; paste credentials in the form.
+2. **MCP client** — call the `register-pce-credentials` tool; the only tool
+   available before credentials are registered.
+
+Other credential tools:
+- `check-pce-credentials-status` — does this user have credentials registered?
+- `delete-pce-credentials` — remove this user's credentials.
+
+### Role-based authorization (Phase 3c)
+
+The server maps each user's IdP groups to one of three internal roles:
+**reader**, **operator**, **admin**. Per-tool authorization is enforced by the
+dispatcher using the `roles` metadata on each `ToolSpec`.
+
+Configure group → role mapping via env (comma-separated):
+
+```bash
+# A user matching ANY of these groups gets that role; highest role wins.
+export MCP_ROLE_GROUPS_ADMIN=sg-illumio-mcp-admin
+export MCP_ROLE_GROUPS_OPERATOR=sg-illumio-mcp-operator,sg-illumio-mcp-admin
+export MCP_ROLE_GROUPS_READER=sg-illumio-mcp-readonly,sg-illumio-mcp-operator,sg-illumio-mcp-admin
+
+# Optional: fallback role when no group matches. Leave unset to refuse.
+# export MCP_ROLE_DEFAULT=reader
+```
+
+Tool-by-tool defaults:
+
+| Tool category | Roles allowed | Examples |
+|---|---|---|
+| Reads | reader, operator, admin | `get-labels`, `get-workloads`, `get-traffic-flows` |
+| Writes | operator, admin | `create-*`, `update-*`, `delete-*` |
+| Provisioning + bulk | admin | `provision-policy`, `ringfence-batch` |
+
+A user without a matching role (and no `MCP_ROLE_DEFAULT`) receives a structured
+`forbidden_no_role` error.
+
+### Audit log (Phase 3c)
+
+Every dispatcher decision (allow / deny / error) is written to a SQLite audit
+database. Schema and storage location:
+
+```bash
+# Defaults to <keystore_dir>/audit.db
+export MCP_AUDIT_LOG_PATH=/var/lib/illumio-mcp/audit.db
+```
+
+Audit rows include `(ts, sub, iss, tool, decision, reason, role, request_id)`
+— **never** tool arguments. The `request_id` matches the `X-Request-Id`
+response header so external traces can be correlated.
+
+Query examples:
+
+```sql
+-- Recent denied calls per user
+SELECT ts, sub, tool, reason FROM audit_log
+WHERE decision='denied'
+ORDER BY ts DESC LIMIT 20;
+
+-- Tool-call volume by user
+SELECT sub, COUNT(*) FROM audit_log
+WHERE ts > date('now', '-7 days')
+GROUP BY sub ORDER BY 2 DESC;
+```
+
+### Confirm tokens for mutating tools (Phase 3d)
+
+Tools marked `requires_confirm=True` (currently `provision-policy`,
+`ringfence-batch`, `register-pce-credentials`, `delete-pce-credentials`) require
+a server-issued single-use confirm token in `params._meta.confirm_token` when
+called over HTTP. Stdio mode is unaffected — the operator who launched the
+process can call mutating tools directly.
+
+Required env in auth mode:
+
+```bash
+export MCP_CONFIRM_HMAC_KEY=$(python -c 'import os, base64; print(base64.b64encode(os.urandom(32)).decode())')
+# Optional:
+# export MCP_CONFIRM_TTL_SECONDS=120
+# export MCP_CONFIRM_JTI_PATH=/var/lib/illumio-mcp/jti.db
+# export MCP_CONFIRM_FRESH_AUTH_SECONDS=300   # require JWT auth_time within 5 min
+```
+
+#### How a client uses it
+
+1. Call the mutating tool without a token → server returns:
+   ```json
+   {"error": "confirm_required", "params_hash": "<sha256>", "message": "..."}
+   ```
+2. Call `POST /confirm` with the JWT and the params_hash:
+   ```bash
+   curl -X POST https://mcp.illumio.example/confirm \
+     -H "Authorization: Bearer $JWT" \
+     -H "Content-Type: application/json" \
+     -d '{"tool":"provision-policy","params_hash":"<sha256>"}'
+   # → {"confirm_token": "...", "expires_in": 120}
+   ```
+3. Re-call the tool with the token in `params._meta.confirm_token`.
+
+Tokens are **single-use** (replays return `confirm_token_replay`) and **scoped**
+to `(sub, tool, params_hash)`. Tampering with any field invalidates the token.
+
+#### Step-up auth (optional, recommended for production)
+
+Set `MCP_CONFIRM_FRESH_AUTH_SECONDS=300` to require the JWT's `auth_time`
+claim to be within the last 5 minutes. Forces the user to re-authenticate
+before minting a token — the strongest prompt-injection defense available
+without an interactive session model. Requires the IdP to issue `auth_time`
+(Entra and Okta both do for OIDC sign-in flows).
 
 ## Tools
 

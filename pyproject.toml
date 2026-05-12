@@ -9,6 +9,7 @@ dependencies = [
  "logging>=0.4.9.6",
  "mcp>=1.8.0",
  "pandas>=2.2.3",
+ "pyjwt[crypto]>=2.8.0",
  "python-dotenv>=1.0.1",
  "starlette>=0.40.0",
  "uvicorn[standard]>=0.30.0",

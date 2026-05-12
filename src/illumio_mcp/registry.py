@@ -25,16 +25,20 @@ class ToolSpec:
         handler: The handler callable. Signature: (ctx, arguments) -> list.
         roles: Set of roles permitted to call this tool. Must be non-empty.
         mutating: True if the tool changes PCE state (create/update/delete/provision).
-        requires_confirm: True if a step-up confirm token is required (Phase 3).
+        requires_confirm: True if a step-up confirm token is required (Phase 3d).
             Implies mutating=True.
         unscopable: True if the tool returns PCE-wide data that cannot be safely
-            filtered to a user's allowed label scopes (Phase 3).
+            filtered to a user's allowed label scopes (Phase 3c).
+        requires_pce: True if the tool needs ctx.pce to be non-None. Defaults
+            True. Set to False for credential-management tools that run before
+            a user has onboarded (e.g., register-pce-credentials).
     """
     handler: Callable
     roles: frozenset[Role] | set[Role]
     mutating: bool = False
     requires_confirm: bool = False
     unscopable: bool = False
+    requires_pce: bool = True
 
     def __post_init__(self):
         if not self.roles:

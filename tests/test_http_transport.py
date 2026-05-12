@@ -37,7 +37,8 @@ def http_server_url():
     from illumio_mcp.transport.http import _build_app
 
     port = _free_port()
-    config = uvicorn.Config(_build_app(), host="127.0.0.1", port=port, log_level="warning")
+    from illumio_mcp.auth.audit import NullAuditLog
+    config = uvicorn.Config(_build_app(None, None, None, NullAuditLog(), None, None, "per_user"), host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
     thread = threading.Thread(target=server.run, daemon=True)
@@ -91,7 +92,7 @@ async def test_initialize_and_list_tools_over_http(http_server_url):
             for expected in ("get-labels", "get-workloads", "check-pce-connection", "provision-policy"):
                 assert expected in tool_names, f"Missing {expected!r} in HTTP-transport tool list"
             # Same count as stdio (matches test_tool_metadata.py's expectation)
-            assert len(tool_names) == 43
+            assert len(tool_names) == 46
 
 
 async def test_check_pce_connection_over_http(http_server_url):

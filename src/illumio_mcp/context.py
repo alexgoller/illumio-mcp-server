@@ -1,20 +1,21 @@
 """ToolContext: the per-call object every tool handler receives.
 
-In Phase 1 (this refactor) it carries only the PCE client and a flag indicating
-whether we're running under stdio (the default today). Phases 2 and 3 will add
-user identity, role, scope, and request-id fields. Existing call sites should
-not break when those are added — they all have defaults.
+Phase 3e: adds `pce_mode` so handlers (and the dispatcher) can branch on
+shared vs per-user PCE behavior.
 """
 from dataclasses import dataclass
 
 
 @dataclass
 class ToolContext:
-    """Everything a tool handler needs that is *not* the tool's own arguments.
-
-    Build one per request (HTTP) or once at startup (stdio) and pass it to
-    every handler. Handlers MUST read PCE from `ctx.pce` and never call
-    process-global PCE accessors.
-    """
-    pce: object  # illumio.PolicyComputeEngine, but kept untyped to avoid import here
+    pce: object | None
     is_stdio: bool
+    user_sub: str | None = None
+    user_iss: str | None = None
+    keystore: object | None = None
+    user_role: str | None = None
+    audit_log: object | None = None
+    request_id: str | None = None
+    confirm_manager: object | None = None
+    jti_store: object | None = None
+    pce_mode: str = "per_user"  # 'per_user' (default) | 'shared'
