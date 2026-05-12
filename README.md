@@ -75,6 +75,31 @@ Add the following to the `custom_settings` section:
 }
 ```
 
+## HTTP transport (preview)
+
+The server can also run over HTTP using the MCP Streamable HTTP transport
+(spec rev 2025-03-26). This is **Phase 2** of the multi-user rollout: the HTTP
+path is wired up but **there is no authentication yet** — anyone who can reach
+the port can use any PCE credentials configured on the server. Phase 3 adds
+OAuth + per-user PCE keys.
+
+Start the server:
+
+```bash
+illumio-mcp-http                                       # 127.0.0.1:8080
+# or
+python -m illumio_mcp serve --http --port 8765
+```
+
+Connect from any MCP client (Claude Desktop, ChatGPT desktop, MCP Inspector)
+using the URL `http://127.0.0.1:8080/mcp` and transport "Streamable HTTP".
+
+Health endpoints: `GET /healthz` (liveness), `GET /readyz` (readiness).
+
+**Safety:** the server refuses to bind anything other than `127.0.0.1`/`::1`/`localhost`
+unless `MCP_DEV_INSECURE=1` is set. **Do not run unauthenticated in production.**
+Wait for Phase 3 (OAuth Resource Server + per-user PCE keys).
+
 ## Tools
 
 ### Workload Management
