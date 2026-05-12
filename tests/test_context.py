@@ -22,3 +22,17 @@ def test_tool_context_can_be_extended_with_kwargs():
     ctx = ToolContext(pce=object(), is_stdio=True)
     # If/when we add fields with defaults, existing callers must keep working.
     assert ctx.is_stdio is True
+
+
+def test_tool_context_user_fields_default_to_none():
+    """Stdio call sites construct ToolContext without auth fields; they must
+    default to None so we can branch on them later."""
+    ctx = ToolContext(pce=object(), is_stdio=True)
+    assert ctx.user_sub is None
+    assert ctx.user_iss is None
+
+
+def test_tool_context_can_carry_authenticated_user():
+    ctx = ToolContext(pce=object(), is_stdio=False, user_sub="user-42", user_iss="https://idp")
+    assert ctx.user_sub == "user-42"
+    assert ctx.user_iss == "https://idp"

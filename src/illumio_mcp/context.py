@@ -1,9 +1,8 @@
 """ToolContext: the per-call object every tool handler receives.
 
-In Phase 1 (this refactor) it carries only the PCE client and a flag indicating
-whether we're running under stdio (the default today). Phases 2 and 3 will add
-user identity, role, scope, and request-id fields. Existing call sites should
-not break when those are added — they all have defaults.
+In Phase 1 it carried PCE + is_stdio. Phase 3a adds authenticated user
+identity for the HTTP path. Stdio code constructs ToolContext as before;
+the new fields default to None.
 """
 from dataclasses import dataclass
 
@@ -18,3 +17,5 @@ class ToolContext:
     """
     pce: object  # illumio.PolicyComputeEngine, but kept untyped to avoid import here
     is_stdio: bool
+    user_sub: str | None = None  # IdP `sub` claim (None in stdio mode)
+    user_iss: str | None = None  # IdP `iss` claim (None in stdio mode)
