@@ -1,15 +1,15 @@
 import json
 import logging
 import mcp.types as types
-from ..pce import get_pce, PCE_ORG_ID
+from ..pce import PCE_ORG_ID
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_check_pce_connection(arguments: dict) -> list:
+def handle_check_pce_connection(ctx, arguments: dict) -> list:
     logger.debug("Initializing PCE connection")
     try:
-        pce = get_pce()
+        pce = ctx.pce
         connection_status = pce.check_connection()
         return [types.TextContent(
             type="text",
@@ -24,14 +24,14 @@ def handle_check_pce_connection(arguments: dict) -> list:
         )]
 
 
-def handle_get_events(arguments: dict) -> list:
+def handle_get_events(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET EVENTS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {}
         for param in ['event_type', 'severity', 'status', 'max_results', 'created_by']:
@@ -77,14 +77,14 @@ def handle_get_events(arguments: dict) -> list:
         )]
 
 
-def handle_get_pairing_profiles(arguments: dict) -> list:
+def handle_get_pairing_profiles(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET PAIRING PROFILES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {"max_results": arguments.get("max_results", 50)}
         if arguments.get("name"):
