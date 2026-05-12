@@ -118,6 +118,44 @@ The server logs a prominent warning. Do NOT use in production.
 - `GET /healthz` — liveness
 - `GET /readyz` — readiness (Phase 3a returns the same as healthz; Phase 3b/c will add PCE + JWKS reachability)
 
+### Two PCE modes (Phase 3b vs Phase 3e)
+
+The HTTP server supports two ways to source PCE credentials, selected via
+`MCP_PCE_MODE`:
+
+| Mode | `MCP_PCE_MODE` | PCE creds | Onboarding | PCE-side audit |
+|---|---|---|---|---|
+| **Per-user** (default) | `per_user` | One PCE API key per authenticated user, encrypted in keystore | User registers via `/setup` page or `register-pce-credentials` tool | PCE logs show the real human via per-user API key |
+| **Shared** | `shared` | One PCE service-account key from env (same as stdio) | None — works immediately for any authenticated user | PCE logs show the service account; the MCP audit log is the source of truth for "who did what" |
+
+**Choose per-user when:**
+- You want PCE-side audit attribution to identify the human
+- Users are happy to provide their own PCE API key once
+- You can tolerate the per-user PCE key sprawl (PCE has limits)
+
+**Choose shared when:**
+- The PCE limits API keys per user too aggressively for per-user mode
+- You want zero-friction onboarding (no `/setup` step)
+- You're OK relying on the MCP audit log alone for human-level attribution
+- You operate the PCE service account yourself and rotate it on a schedule
+
+In **shared** mode, `/setup` is not mounted, the credential-management tools
+(`register-pce-credentials`, `delete-pce-credentials`) refuse with a friendly
+error, and `MCP_KEK` is not required. SSO + JWT + role-based authz + audit
+log + confirm tokens all still apply identically.
+
+```bash
+# Shared mode — same env that stdio uses today, plus auth/role config
+export MCP_PCE_MODE=shared
+export PCE_HOST=https://your-pce.example.com
+export PCE_PORT=8443
+export PCE_ORG_ID=1
+export API_KEY=your_pce_api_key_name
+export API_SECRET=your_pce_api_key_secret
+# (other auth/role env vars from earlier sections still apply)
+illumio-mcp-http
+```
+
 ### Per-user PCE keys (Phase 3b)
 
 Each authenticated user has their own PCE API key/secret stored in an
