@@ -6,7 +6,7 @@ import mcp.types as types
 from illumio import TrafficQuery
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
-from ..pce import get_pce, run_sync
+from ..pce import run_sync
 from .constants import MCP_BUG_MAX_RESULTS, MCP_MAX_RESPONSE_BYTES
 
 logger = logging.getLogger('illumio_mcp')
@@ -54,8 +54,7 @@ def _build_split_response(df, total_pce_flows, total_grouped_rows):
     return _serialize(best)
 
 
-def to_dataframe(flows):
-    pce = get_pce()
+def to_dataframe(pce, flows):
 
     label_href_map = {}
     value_href_map = {}
@@ -202,7 +201,7 @@ def summarize_traffic(df):
     return "\n".join(summary_list)
 
 
-def handle_get_traffic_flows(arguments: dict) -> list:
+def handle_get_traffic_flows(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET TRAFFIC FLOWS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -236,7 +235,7 @@ def handle_get_traffic_flows(arguments: dict) -> list:
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         logger.debug(f"Due to a condition in MCP, max results is set to {MCP_BUG_MAX_RESULTS}")
         arguments['max_results'] = MCP_BUG_MAX_RESULTS
@@ -264,7 +263,7 @@ def handle_get_traffic_flows(arguments: dict) -> list:
             headers={'Accept': 'application/json'}
         )
 
-        df = to_dataframe(all_traffic)
+        df = to_dataframe(pce, all_traffic)
 
         if df.empty:
             return [types.TextContent(
@@ -299,7 +298,7 @@ def handle_get_traffic_flows(arguments: dict) -> list:
         )]
 
 
-def handle_get_traffic_flows_summary(arguments: dict) -> list:
+def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET TRAFFIC FLOWS SUMMARY CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -318,7 +317,7 @@ def handle_get_traffic_flows_summary(arguments: dict) -> list:
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         logger.debug(f"Due to a condition in MCP, max results is set to {MCP_BUG_MAX_RESULTS}")
         max_results = int(arguments.get('max_results', 10000))
@@ -350,7 +349,7 @@ def handle_get_traffic_flows_summary(arguments: dict) -> list:
             headers={'Accept': 'application/json'}
         )
 
-        df = to_dataframe(all_traffic)
+        df = to_dataframe(pce, all_traffic)
         summary = summarize_traffic(df)
 
         summary_lines = ""
@@ -377,14 +376,14 @@ def handle_get_traffic_flows_summary(arguments: dict) -> list:
         )]
 
 
-def handle_find_unmanaged_traffic(arguments: dict) -> list:
+def handle_find_unmanaged_traffic(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("FIND UNMANAGED TRAFFIC CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         lookback_days = arguments.get("lookback_days", 30)
         direction = arguments.get("direction", "both")
@@ -403,7 +402,7 @@ def handle_find_unmanaged_traffic(arguments: dict) -> list:
         )
 
         flows = pce.get_traffic_flows_async(query_name='unmanaged-traffic', traffic_query=traffic_query)
-        df = to_dataframe(flows)
+        df = to_dataframe(pce, flows)
 
         if df.empty:
             return [types.TextContent(type="text", text=json.dumps({

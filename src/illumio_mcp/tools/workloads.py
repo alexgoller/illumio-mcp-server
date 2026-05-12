@@ -3,7 +3,6 @@ import logging
 import pandas as pd
 import mcp.types as types
 from illumio import Label, Workload, Interface
-from ..pce import get_pce
 from .constants import MCP_MAX_RESPONSE_BYTES
 
 logger = logging.getLogger('illumio_mcp')
@@ -153,14 +152,14 @@ def _format_labels_only(workloads, label_map):
     return _truncate_split(df, {"total": len(rows)})
 
 
-def handle_get_workloads(arguments: dict) -> list:
+def handle_get_workloads(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET WORKLOADS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
         detail_level = arguments.get('detail_level', 'compact')
 
         params = {"include": "labels", "max_results": arguments.get('max_results', 10000)}
@@ -191,11 +190,11 @@ def handle_get_workloads(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
 
-def handle_create_workload(arguments: dict) -> list:
+def handle_create_workload(ctx, arguments: dict) -> list:
     logger.debug(f"Creating workload with name: {arguments['name']} and ip_addresses: {arguments['ip_addresses']}")
     logger.debug(f"Labels: {arguments['labels']}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         interfaces = []
         prefix = "eth"
@@ -244,10 +243,10 @@ def handle_create_workload(arguments: dict) -> list:
         )]
 
 
-def handle_update_workload(arguments: dict) -> list:
+def handle_update_workload(ctx, arguments: dict) -> list:
     logger.debug(f"UPDATE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         # Find the workload by href or name
         workload_obj = None
@@ -307,10 +306,10 @@ def handle_update_workload(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
 
-def handle_delete_workload(arguments: dict) -> list:
+def handle_delete_workload(ctx, arguments: dict) -> list:
     logger.debug(f"DELETE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         workload_obj = None
         if arguments.get("href"):

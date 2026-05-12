@@ -972,7 +972,7 @@ Run:
 ```bash
 .venv/bin/python3 -c "from illumio_mcp.tools import TOOL_REGISTRY, TOOL_HANDLERS; print(f'{len(TOOL_REGISTRY)} tools, {len(TOOL_HANDLERS)} handlers')"
 ```
-Expected: `45 tools, 45 handlers`
+Expected: `43 tools, 43 handlers`
 
 - [ ] **Step 3: Commit**
 
@@ -1171,7 +1171,7 @@ def test_ringfence_batch_requires_confirm():
 def test_count_matches_expected():
     """Sanity check: tool count is stable. Bump this when you intentionally
     add or remove a tool."""
-    assert len(TOOL_REGISTRY) == 45, \
+    assert len(TOOL_REGISTRY) == 43, \
         f"Tool count drifted to {len(TOOL_REGISTRY)}; update this test if intentional"
 ```
 

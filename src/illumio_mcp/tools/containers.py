@@ -1,19 +1,19 @@
 import json
 import logging
 import mcp.types as types
-from ..pce import get_pce, PCE_ORG_ID
+from ..pce import PCE_ORG_ID
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_get_container_workload_profiles(arguments: dict) -> list:
+def handle_get_container_workload_profiles(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET CONTAINER WORKLOAD PROFILES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         cluster_href = arguments.get("cluster_href")
 
@@ -66,14 +66,14 @@ def handle_get_container_workload_profiles(arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_update_container_workload_profile(arguments: dict) -> list:
+def handle_update_container_workload_profile(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE CONTAINER WORKLOAD PROFILE CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         profile_href = arguments["profile_href"]
         payload = {}
@@ -97,14 +97,14 @@ def handle_update_container_workload_profile(arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_get_kubernetes_workloads(arguments: dict) -> list:
+def handle_get_kubernetes_workloads(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET KUBERNETES WORKLOADS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {"max_results": arguments.get("max_results", 500)}
         if arguments.get("namespace"):
@@ -143,14 +143,14 @@ def handle_get_kubernetes_workloads(arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_get_container_clusters(arguments: dict) -> list:
+def handle_get_container_clusters(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET CONTAINER CLUSTERS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {"max_results": arguments.get("max_results", 50)}
         if arguments.get("name"):

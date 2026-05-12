@@ -1,19 +1,18 @@
 import json
 import logging
 import mcp.types as types
-from ..pce import get_pce
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_create_deny_rule(arguments: dict) -> list:
+def handle_create_deny_rule(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE DENY RULE CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         # Build label maps
         label_href_map = {}
@@ -150,11 +149,11 @@ def handle_create_deny_rule(arguments: dict) -> list:
                 text=json.dumps({"error": error_msg}, indent=2)
             )]
 
-def handle_update_deny_rule(arguments: dict) -> list:
+def handle_update_deny_rule(ctx, arguments: dict) -> list:
     logger.debug(f"UPDATE DENY RULE CALLED with arguments: {json.dumps(arguments, indent=2)}")
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         href = arguments["href"]
         if '/active/' in href:
@@ -227,11 +226,11 @@ def handle_update_deny_rule(arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_delete_deny_rule(arguments: dict) -> list:
+def handle_delete_deny_rule(ctx, arguments: dict) -> list:
     logger.debug(f"DELETE DENY RULE CALLED with arguments: {json.dumps(arguments, indent=2)}")
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         href = arguments["href"]
         if '/active/' in href:

@@ -6,21 +6,20 @@ import mcp.types as types
 from illumio import TrafficQuery, RuleSet, LabelSet, Rule, AMS, ServicePort
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
-from ..pce import get_pce
 from .traffic import to_dataframe
 from .constants import MCP_BUG_MAX_RESULTS
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_create_ringfence(arguments: dict) -> list:
+def handle_create_ringfence(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE RINGFENCE CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         app_name = arguments["app_name"]
         env_name = arguments["env_name"]
@@ -126,8 +125,8 @@ def handle_create_ringfence(arguments: dict) -> list:
         )
 
         # Step 5: Convert flows to dataframes and group by app+env
-        inbound_df = to_dataframe(inbound_flows)
-        outbound_df = to_dataframe(outbound_flows)
+        inbound_df = to_dataframe(pce, inbound_flows)
+        outbound_df = to_dataframe(pce, outbound_flows)
 
         remote_apps_inbound = {}  # key: (app_value, env_value) -> list of {port, proto, connections}
         remote_apps_outbound = {}
@@ -511,7 +510,7 @@ def handle_create_ringfence(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_ringfence_batch(arguments: dict) -> list:
+def handle_ringfence_batch(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("RINGFENCE BATCH CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -525,7 +524,7 @@ def handle_ringfence_batch(arguments: dict) -> list:
 
         if auto_order:
             # Use infrastructure identification to order apps
-            infra_result = handle_identify_infrastructure_services({
+            infra_result = handle_identify_infrastructure_services(ctx, {
                 "lookback_days": lookback_days,
                 "top_n": 1000
             })
@@ -552,7 +551,7 @@ def handle_ringfence_batch(arguments: dict) -> list:
             }
 
             try:
-                rf_result = handle_create_ringfence(rf_args)
+                rf_result = handle_create_ringfence(ctx, rf_args)
                 result_data = json.loads(rf_result[0].text)
                 results.append({
                     "app": app["app_name"],
@@ -590,14 +589,14 @@ def handle_ringfence_batch(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_identify_infrastructure_services(arguments: dict) -> list:
+def handle_identify_infrastructure_services(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("IDENTIFY INFRASTRUCTURE SERVICES CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         lookback_days = arguments.get("lookback_days", 90)
         min_connections = arguments.get("min_connections", 1)
@@ -626,7 +625,7 @@ def handle_identify_infrastructure_services(arguments: dict) -> list:
                 "lookback_days": lookback_days
             }, indent=2))]
 
-        df = to_dataframe(flows)
+        df = to_dataframe(pce, flows)
 
         if df.empty or 'src_app' not in df.columns or 'dst_app' not in df.columns:
             return [types.TextContent(type="text", text=json.dumps({
@@ -852,14 +851,14 @@ def handle_identify_infrastructure_services(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_detect_lateral_movement_paths(arguments: dict) -> list:
+def handle_detect_lateral_movement_paths(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DETECT LATERAL MOVEMENT PATHS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         lookback_days = arguments.get("lookback_days", 30)
         max_hops = arguments.get("max_hops", 4)
@@ -878,7 +877,7 @@ def handle_detect_lateral_movement_paths(arguments: dict) -> list:
         )
 
         flows = pce.get_traffic_flows_async(query_name='lateral-movement', traffic_query=traffic_query)
-        df = to_dataframe(flows)
+        df = to_dataframe(pce, flows)
 
         if df.empty or 'src_app' not in df.columns or 'dst_app' not in df.columns:
             return [types.TextContent(type="text", text=json.dumps({

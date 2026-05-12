@@ -6,21 +6,20 @@ import mcp.types as types
 from illumio import TrafficQuery
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
-from ..pce import get_pce
 from .traffic import to_dataframe
 from .constants import MCP_BUG_MAX_RESULTS
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_compliance_check(arguments: dict) -> list:
+def handle_compliance_check(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("COMPLIANCE CHECK CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         framework = arguments.get("framework", "general")
         app_name = arguments.get("app_name")
@@ -170,7 +169,7 @@ def handle_compliance_check(arguments: dict) -> list:
 
         traffic_query = TrafficQuery.build(**query_kwargs)
         flows = pce.get_traffic_flows_async(query_name='compliance-check', traffic_query=traffic_query)
-        df = to_dataframe(flows)
+        df = to_dataframe(pce, flows)
 
         # Run compliance checks
         findings = []
@@ -330,14 +329,14 @@ def handle_compliance_check(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_enforcement_readiness(arguments: dict) -> list:
+def handle_enforcement_readiness(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("ENFORCEMENT READINESS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         app_name = arguments["app_name"]
         env_name = arguments["env_name"]
@@ -398,8 +397,8 @@ def handle_enforcement_readiness(arguments: dict) -> list:
         )
         outbound_flows = pce.get_traffic_flows_async(query_name='readiness-outbound', traffic_query=traffic_query_out)
 
-        inbound_df = to_dataframe(inbound_flows)
-        outbound_df = to_dataframe(outbound_flows)
+        inbound_df = to_dataframe(pce, inbound_flows)
+        outbound_df = to_dataframe(pce, outbound_flows)
 
         # Analyze policy decisions
         policy_stats = {"allowed": 0, "potentially_blocked": 0, "blocked": 0, "unknown": 0}
@@ -516,14 +515,14 @@ def handle_enforcement_readiness(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_get_policy_coverage_report(arguments: dict) -> list:
+def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET POLICY COVERAGE REPORT CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         app_name = arguments["app_name"]
         env_name = arguments["env_name"]
@@ -569,8 +568,8 @@ def handle_get_policy_coverage_report(arguments: dict) -> list:
         )
         outbound_flows = pce.get_traffic_flows_async(query_name='coverage-outbound', traffic_query=traffic_query_out)
 
-        inbound_df = to_dataframe(inbound_flows)
-        outbound_df = to_dataframe(outbound_flows)
+        inbound_df = to_dataframe(pce, inbound_flows)
+        outbound_df = to_dataframe(pce, outbound_flows)
 
         # Analyze by policy decision
         def analyze_coverage(df, direction):
@@ -652,14 +651,14 @@ def handle_get_policy_coverage_report(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_compare_draft_active(arguments: dict) -> list:
+def handle_compare_draft_active(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("COMPARE DRAFT ACTIVE CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         resource_type = arguments.get("resource_type", "all")
 
@@ -731,14 +730,14 @@ def handle_compare_draft_active(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
 
-def handle_get_workload_enforcement_status(arguments: dict) -> list:
+def handle_get_workload_enforcement_status(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET WORKLOAD ENFORCEMENT STATUS CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
     logger.debug("=" * 80)
 
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {"include": "labels", "max_results": 10000}
 
