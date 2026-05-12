@@ -118,6 +118,33 @@ The server logs a prominent warning. Do NOT use in production.
 - `GET /healthz` — liveness
 - `GET /readyz` — readiness (Phase 3a returns the same as healthz; Phase 3b/c will add PCE + JWKS reachability)
 
+### Per-user PCE keys (Phase 3b)
+
+Each authenticated user has their own PCE API key/secret stored in an
+encrypted SQLite keystore. PCE-side audit logs attribute correctly per human;
+revoking a user is a single tool call.
+
+Additional env required when running with auth:
+
+```bash
+export MCP_KEK=$(python -c 'import os, base64; print(base64.b64encode(os.urandom(32)).decode())')
+export MCP_KEYSTORE_PATH=/var/lib/illumio-mcp/keys.db   # default: ./data/keys.db
+```
+
+The KEK is **never** stored next to the database. Loss of KEK = total loss of
+stored creds (intentional, fail-closed). For production, source MCP_KEK from
+KMS or Vault rather than the operator's shell.
+
+Onboarding paths (either works):
+
+1. **Browser** — visit `/setup` after authenticating; paste credentials in the form.
+2. **MCP client** — call the `register-pce-credentials` tool; the only tool
+   available before credentials are registered.
+
+Other credential tools:
+- `check-pce-credentials-status` — does this user have credentials registered?
+- `delete-pce-credentials` — remove this user's credentials.
+
 ## Tools
 
 ### Workload Management
