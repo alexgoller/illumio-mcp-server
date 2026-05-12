@@ -2,15 +2,14 @@ import json
 import logging
 import mcp.types as types
 from illumio import Label
-from ..pce import get_pce
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_get_labels(arguments: dict) -> list:
+def handle_get_labels(ctx, arguments: dict) -> list:
     logger.debug("Initializing PCE connection")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {}
         if arguments.get('key'):
@@ -39,10 +38,10 @@ def handle_get_labels(arguments: dict) -> list:
         )]
 
 
-def handle_create_label(arguments: dict) -> list:
+def handle_create_label(ctx, arguments: dict) -> list:
     logger.debug(f"Creating label with key: {arguments['key']} and value: {arguments['value']}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
         label = Label(key=arguments['key'], value=arguments['value'])
         label = pce.labels.create(label)
         logger.debug(f"Label created with status: {label}")
@@ -59,10 +58,10 @@ def handle_create_label(arguments: dict) -> list:
         )]
 
 
-def handle_update_label(arguments: dict) -> list:
+def handle_update_label(ctx, arguments: dict) -> list:
     logger.debug("Initializing PCE connection")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         href = arguments.get("href")
         key = arguments.get("key")
@@ -127,10 +126,10 @@ def handle_update_label(arguments: dict) -> list:
         )]
 
 
-def handle_delete_label(arguments: dict) -> list:
+def handle_delete_label(ctx, arguments: dict) -> list:
     logger.debug(f"Deleting label with key: {arguments['key']} and value: {arguments['value']}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
         label = pce.labels.get(params={"key": arguments['key'], "value": arguments['value']})
         if label:
             pce.labels.delete(label[0])
