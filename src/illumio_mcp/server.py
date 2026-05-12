@@ -3159,9 +3159,11 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
-async def main():
-    # Run the server using stdin/stdout streams
-    logger.debug("Starting server")
+async def run_stdio() -> None:
+    """Run the MCP server over stdio. This is the default entry point used by
+    Claude Desktop, Cursor, and other clients that launch the server as a
+    subprocess."""
+    logger.debug("Starting stdio server")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
