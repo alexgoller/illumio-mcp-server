@@ -122,7 +122,8 @@ def http_server(public_key_pem, tmp_path_factory):
         user = scope.get("state", {}).get("user")
         sub = getattr(user, "sub", None) if user else None
         iss = getattr(user, "iss", None) if user else None
-        ctx = build_http_context_for(sub, iss, keystore)
+        from illumio_mcp.auth.audit import NullAuditLog
+        ctx = build_http_context_for(sub, iss, keystore, user_role="admin", audit_log=NullAuditLog(), request_id=None)
         token = set_http_context(ctx)
         try:
             await session_manager.handle_request(scope, receive, send)
