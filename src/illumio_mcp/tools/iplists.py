@@ -1,15 +1,14 @@
 import json
 import logging
 import mcp.types as types
-from ..pce import get_pce
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def handle_get_iplists(arguments: dict) -> list:
+def handle_get_iplists(ctx, arguments: dict) -> list:
     logger.debug(f"GET IP LISTS CALLED with arguments: {json.dumps(arguments, indent=2)}")
     try:
-        pce = get_pce()
+        pce = ctx.pce
 
         params = {"max_results": arguments.get("max_results", 10000)}
         for param in ['name', 'description', 'fqdn', 'ip_address']:
@@ -41,7 +40,7 @@ def handle_get_iplists(arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
 
-def handle_create_iplist(arguments: dict) -> list:
+def handle_create_iplist(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE IP LIST CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -49,7 +48,7 @@ def handle_create_iplist(arguments: dict) -> list:
 
     try:
         logger.debug("Initializing PCE connection...")
-        pce = get_pce()
+        pce = ctx.pce
 
         # Check if IP List already exists
         logger.debug(f"Checking if IP List '{arguments['name']}' already exists...")
@@ -129,7 +128,7 @@ def handle_create_iplist(arguments: dict) -> list:
         )]
 
 
-def handle_update_iplist(arguments: dict) -> list:
+def handle_update_iplist(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE IP LIST CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -137,7 +136,7 @@ def handle_update_iplist(arguments: dict) -> list:
 
     try:
         logger.debug("Initializing PCE connection...")
-        pce = get_pce()
+        pce = ctx.pce
 
         # Find the IP List
         iplist = None
@@ -230,7 +229,7 @@ def handle_update_iplist(arguments: dict) -> list:
         )]
 
 
-def handle_delete_iplist(arguments: dict) -> list:
+def handle_delete_iplist(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DELETE IP LIST CALLED")
     logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
@@ -238,7 +237,7 @@ def handle_delete_iplist(arguments: dict) -> list:
 
     try:
         logger.debug("Initializing PCE connection...")
-        pce = get_pce()
+        pce = ctx.pce
 
         # Find the IP List
         iplist = None
