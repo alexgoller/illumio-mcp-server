@@ -3261,9 +3261,34 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
         ),
     ]
 
+# Argument keys whose values must NEVER appear in logs. Verified by
+# tests/test_log_scrub.py. When adding a new sensitive arg, add it here too.
+_SENSITIVE_ARG_KEYS = frozenset({"api_key", "api_secret", "confirm_token"})
+
+
+def _scrub_arguments_for_log(arguments: dict | None) -> dict:
+    """Return a copy of `arguments` with sensitive values replaced by '***'.
+
+    Recurses one level into a `_meta` sub-dict (where `confirm_token` lives)
+    but does not deep-recurse arbitrary structures — sensitive args in
+    Phase 1-3e all live at the top level or in `_meta`.
+    """
+    if not arguments:
+        return {}
+    scrubbed: dict = {}
+    for k, v in arguments.items():
+        if k in _SENSITIVE_ARG_KEYS:
+            scrubbed[k] = "***"
+        elif k == "_meta" and isinstance(v, dict):
+            scrubbed[k] = {ik: ("***" if ik in _SENSITIVE_ARG_KEYS else iv) for ik, iv in v.items()}
+        else:
+            scrubbed[k] = v
+    return scrubbed
+
+
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-    logger.debug(f"Tool called: {name} with arguments: {arguments}")
+    logger.debug("Tool called: %s with arguments: %s", name, _scrub_arguments_for_log(arguments))
     spec = TOOL_REGISTRY.get(name)
     if spec is None:
         raise ValueError(f"Unknown tool: {name}")
