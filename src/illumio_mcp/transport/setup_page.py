@@ -8,6 +8,8 @@ time these handlers run, request.state.user is populated.
 """
 from __future__ import annotations
 
+import html
+
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, Response
 from starlette.routing import Route
@@ -66,7 +68,14 @@ def build_setup_routes(keystore) -> list[Route]:
         user = getattr(request.state, "user", None)
         if user is None:
             return HTMLResponse("Unauthorized", status_code=401)
-        return HTMLResponse(_FORM_HTML.format(sub=user.sub, iss=user.iss))
+        # HTML-escape sub/iss before interpolation — they come from a JWT
+        # whose issuer we trust to validate but whose sub/iss values we
+        # cannot trust to be HTML-safe (a malicious or malformed IdP could
+        # issue tokens with markup in those fields).
+        return HTMLResponse(_FORM_HTML.format(
+            sub=html.escape(user.sub),
+            iss=html.escape(user.iss),
+        ))
 
     async def post_setup(request: Request) -> Response:
         user = getattr(request.state, "user", None)
