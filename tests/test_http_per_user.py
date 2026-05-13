@@ -226,3 +226,24 @@ async def test_setup_page_get_returns_html(http_server, private_key_pem):
         body = resp.read().decode()
         assert "PCE Credentials" in body
         assert "carol" in body
+
+
+async def test_setup_page_html_escapes_jwt_sub_and_iss(http_server, private_key_pem):
+    """Regression test for HIGH finding from 2026-05-13 security review:
+    JWT sub/iss claims must be HTML-escaped before interpolation into the
+    /setup page, otherwise a malicious or malformed IdP can XSS the
+    operator's browser."""
+    xss_sub = "<script>alert('xss-sub')</script>"
+    # `iss` is harder to control (must match the validator's expected issuer)
+    # so we only test sub here. The fix escapes both with the same helper.
+    token = _mint(private_key_pem, sub=xss_sub)
+    req = urllib.request.Request(
+        f"{http_server}/setup",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req) as resp:
+        body = resp.read().decode()
+    # Raw script tag MUST NOT appear in the response body.
+    assert "<script>alert('xss-sub')</script>" not in body
+    # The escaped form SHOULD appear (proves we got the value through, just escaped).
+    assert "&lt;script&gt;alert(" in body
