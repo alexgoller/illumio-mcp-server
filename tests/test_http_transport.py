@@ -95,7 +95,7 @@ async def test_initialize_and_list_tools_over_http(http_server_url):
             assert len(tool_names) == 46
 
 
-async def test_check_pce_connection_over_http(http_server_url):
+async def test_check_pce_connection_over_http(http_server_url, requires_pce):
     """A real tool call round-trips through HTTP. Uses check-pce-connection
     because it's fast and proves the PCE handshake reaches Illumio via the
     same ToolContext path that stdio uses."""
@@ -108,7 +108,7 @@ async def test_check_pce_connection_over_http(http_server_url):
                 f"check-pce-connection returned unexpected text: {text!r}"
 
 
-async def test_get_labels_over_http(http_server_url):
+async def test_get_labels_over_http(http_server_url, requires_pce):
     """Non-trivial tool call returns a non-empty body."""
     async with streamablehttp_client(f"{http_server_url}/mcp") as (read, write, _get_session_id):
         async with ClientSession(read, write) as session:

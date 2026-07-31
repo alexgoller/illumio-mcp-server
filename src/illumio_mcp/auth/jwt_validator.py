@@ -32,6 +32,11 @@ class AuthenticatedUser:
     iss: str
     scopes: list[str]
     groups: list[str] = field(default_factory=list)
+    # OIDC `auth_time` (seconds since epoch) — when the end-user actually
+    # authenticated, as opposed to `iat` (when this token was minted, possibly
+    # from a refresh token). Optional in OIDC, so None when the IdP omits it.
+    # Consumed by the /confirm fresh-auth gate.
+    auth_time: int | None = None
 
 
 def _normalize_scopes(scope_claim) -> list[str]:
@@ -42,6 +47,22 @@ def _normalize_scopes(scope_claim) -> list[str]:
     if isinstance(scope_claim, str):
         return scope_claim.split()
     return []
+
+
+def _normalize_auth_time(value) -> int | None:
+    """Coerce the OIDC `auth_time` claim to an int, or None if unusable.
+
+    Spec'd as a NumericDate, but IdPs have been observed sending it as a string.
+    A malformed value is treated as absent rather than raising: `auth_time` is
+    not required for token validity, and the /confirm fresh-auth gate already
+    fails closed on None.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_groups(token_payload: dict) -> list[str]:
@@ -114,4 +135,5 @@ class JWTValidator:
             iss=str(payload["iss"]),
             scopes=scopes,
             groups=_normalize_groups(payload),
+            auth_time=_normalize_auth_time(payload.get("auth_time")),
         )
