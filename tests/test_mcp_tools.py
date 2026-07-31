@@ -121,10 +121,16 @@ class TestLabels:
                 assert "error" not in create_text.lower(), \
                     f"Create label failed: {create_text}"
 
-                # Find href of created label
-                labels_result = await session.call_tool("get-labels", {})
+                # Find href of created label.
+                # Deliberately filtered: an unfiltered get-labels is capped at
+                # one page (500 on this PCE), so on an org with more labels than
+                # that, a freshly created one is simply not in the response.
+                labels_result = await session.call_tool("get-labels", {
+                    "key": self.LABEL_KEY, "value": self.LABEL_VALUE
+                })
                 href = self._find_label_href(labels_result.content[0].text, self.LABEL_VALUE)
-                assert href, "Could not find created label"
+                assert href, \
+                    f"Could not find created label: {labels_result.content[0].text[:300]}"
 
                 # Update (changes value to _updated)
                 update_result = await session.call_tool("update-label", {
@@ -153,9 +159,18 @@ class TestWorkloads:
     WORKLOAD_NAME = "__mcp_test_workload__"
 
     async def test_get_workloads(self):
-        result = await run_tool("get-workloads", {})
-        text = result.content[0].text
-        assert "Workloads:" in text
+        """get-workloads returns a JSON envelope, not a 'Workloads:' prefix.
+
+        The prefix went away when get-workloads became dual-mode with
+        MCP-aware response sizing; this asserts the envelope contract that
+        replaced it.
+        """
+        data = parse_result(await run_tool("get-workloads", {}))
+        assert isinstance(data, dict), f"expected a JSON envelope, got: {data!r:.200}"
+        assert_no_error(data, "get-workloads")
+        for key in ("total", "returned", "truncated", "columns"):
+            assert key in data, f"envelope missing {key!r}: {sorted(data)}"
+        assert data["returned"] <= data["total"]
 
     async def test_get_workloads_with_name_filter(self):
         result = await run_tool("get-workloads", {"name": "nonexistent_xyz_12345"})
