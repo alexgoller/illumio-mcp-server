@@ -2179,7 +2179,7 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "description": "Filter by label key/type (e.g., 'role', 'app', 'env', 'loc')"},
+                    "key": {"type": "string", "description": "Filter by label key/type, matched exactly (e.g., 'role', 'app', 'env', 'loc'). 'role' will not match 'servicerole'"},
                     "value": {"type": "string", "description": "Filter by label value (supports partial matches)"},
                     "max_results": {"type": "integer", "description": "Maximum number of labels to return"},
                     "include_deleted": {"type": "boolean", "description": "Include deleted labels"},
