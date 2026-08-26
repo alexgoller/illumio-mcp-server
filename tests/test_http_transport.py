@@ -91,8 +91,10 @@ async def test_initialize_and_list_tools_over_http(http_server_url):
             # Sanity: a handful of well-known tools from the registry
             for expected in ("get-labels", "get-workloads", "check-pce-connection", "provision-policy"):
                 assert expected in tool_names, f"Missing {expected!r} in HTTP-transport tool list"
-            # Same count as stdio (matches test_tool_metadata.py's expectation)
-            assert len(tool_names) == 46
+            # Derived, not hardcoded: a literal count is another place to forget
+            # when a tool is added (see tests/test_mcp_protocol.py).
+            from illumio_mcp.tools import TOOL_REGISTRY
+            assert set(tool_names) == set(TOOL_REGISTRY)
 
 
 async def test_check_pce_connection_over_http(http_server_url, requires_pce):

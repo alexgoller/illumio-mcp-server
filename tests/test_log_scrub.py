@@ -100,16 +100,29 @@ def test_no_tool_handler_dumps_raw_arguments():
     A source-level guard rather than a behavioural one: the risk is a *new*
     handler reintroducing the pattern, which only a grep-style check catches.
     """
+    # Anchor to this file, not the cwd: a relative path silently scans nothing
+    # when pytest runs from elsewhere, and the guard would pass vacuously.
+    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "illumio_mcp"
+    scanned = 0
     offenders = []
-    for path in sorted(pathlib.Path("src/illumio_mcp").rglob("*.py")):
+    for path in sorted(src.rglob("*.py")):
+        scanned += 1
         if path.name == "log_scrub.py":
             continue  # the module that defines the control describes the pattern
         for n, line in enumerate(path.read_text().splitlines(), 1):
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            if "json.dumps(arguments" in line and "scrub_arguments_for_log" not in line:
+            # Catch both the direct form and dumps of values derived from
+            # arguments (rule_def, scopes, ...), which the narrower grep missed.
+            if "json.dumps(" not in line:
+                continue
+            if "scrub" in line or "ScrubbedArgs" in line:
+                continue
+            dumped = line.split("json.dumps(", 1)[1]
+            if dumped.startswith(("arguments", "rule_def", "rule_payload", "scope", "rule", "label", "creds", "payload")):
                 offenders.append(f"{path}:{n}: {stripped}")
+    assert scanned > 10, f"guard scanned only {scanned} files -- it is not looking at the source tree"
     assert not offenders, "unscrubbed argument logging:\n  " + "\n  ".join(offenders)
 
 
@@ -156,3 +169,66 @@ def test_invalid_log_level_falls_back_to_info(monkeypatch):
     from illumio_mcp.server import _resolve_log_level
     monkeypatch.setenv("MCP_LOG_LEVEL", "verbose-please")
     assert _resolve_log_level() == logging.INFO
+
+
+# ---------------------------------------------------------------------------
+# Lazy evaluation. bbc8441 deliberately moved to %-formatting so the work is
+# skipped when the record is discarded; the scrubbing sweep initially undid
+# that with eager f-strings. Since the default level is now INFO, an eager form
+# means every tool call pays for a recursive copy plus pretty-printed JSON that
+# is thrown away.
+# ---------------------------------------------------------------------------
+
+import io
+import logging as _logging
+
+from illumio_mcp.log_scrub import ScrubbedArgs
+
+
+def _counting_logger(level):
+    calls = {"n": 0}
+
+    class Counting(ScrubbedArgs):
+        def __str__(self):
+            calls["n"] += 1
+            return super().__str__()
+
+    log = _logging.getLogger(f"scrubtest.{level}")
+    log.handlers[:] = [_logging.StreamHandler(io.StringIO())]
+    log.propagate = False
+    log.setLevel(level)
+    return log, Counting, calls
+
+
+def test_scrubbed_args_does_no_work_when_record_is_discarded():
+    log, Counting, calls = _counting_logger(_logging.INFO)
+    log.debug("args: %s", Counting({"a": 1}))
+    assert calls["n"] == 0, "ScrubbedArgs serialised despite DEBUG being suppressed"
+
+
+def test_scrubbed_args_does_work_when_record_is_emitted():
+    log, Counting, calls = _counting_logger(_logging.DEBUG)
+    log.debug("args: %s", Counting({"a": 1}))
+    assert calls["n"] == 1
+
+
+def test_scrubbed_args_redacts_when_emitted():
+    buf = io.StringIO()
+    log = _logging.getLogger("scrubtest.emit")
+    log.handlers[:] = [_logging.StreamHandler(buf)]
+    log.propagate = False
+    log.setLevel(_logging.DEBUG)
+    log.debug("args: %s", ScrubbedArgs({"_meta": {"confirm_token": "LEAKED"}}))
+    assert "LEAKED" not in buf.getvalue()
+    assert "***" in buf.getvalue()
+
+
+def test_scrubbed_args_supports_sub_key_selection():
+    assert "rule-a" in str(ScrubbedArgs({"rules": ["rule-a"]}, "rules"))
+
+
+def test_scrubbed_args_does_not_mutate_caller_arguments():
+    args = {"api_key": "real-key", "_meta": {"confirm_token": "real-token"}}
+    str(ScrubbedArgs(args))
+    assert args["api_key"] == "real-key"
+    assert args["_meta"]["confirm_token"] == "real-token"

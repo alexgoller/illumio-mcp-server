@@ -2,7 +2,7 @@ import json
 import logging
 import mcp.types as types
 from ..pce import PCE_ORG_ID
-from ..log_scrub import scrub_arguments_for_log
+from ..log_scrub import ScrubbedArgs
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -10,7 +10,7 @@ logger = logging.getLogger('illumio_mcp')
 def handle_get_container_workload_profiles(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET CONTAINER WORKLOAD PROFILES CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -70,7 +70,7 @@ def handle_get_container_workload_profiles(ctx, arguments: dict) -> list:
 def handle_update_container_workload_profile(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE CONTAINER WORKLOAD PROFILE CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -101,7 +101,7 @@ def handle_update_container_workload_profile(ctx, arguments: dict) -> list:
 def handle_get_kubernetes_workloads(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET KUBERNETES WORKLOADS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -147,7 +147,7 @@ def handle_get_kubernetes_workloads(ctx, arguments: dict) -> list:
 def handle_get_container_clusters(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET CONTAINER CLUSTERS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:

@@ -8,7 +8,7 @@ from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
 from .traffic import to_dataframe
 from .constants import MCP_BUG_MAX_RESULTS
-from ..log_scrub import scrub_arguments_for_log
+from ..log_scrub import ScrubbedArgs
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -16,7 +16,7 @@ logger = logging.getLogger('illumio_mcp')
 def handle_create_ringfence(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE RINGFENCE CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -514,7 +514,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
 def handle_ringfence_batch(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("RINGFENCE BATCH CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -593,7 +593,7 @@ def handle_ringfence_batch(ctx, arguments: dict) -> list:
 def handle_identify_infrastructure_services(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("IDENTIFY INFRASTRUCTURE SERVICES CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -855,7 +855,7 @@ def handle_identify_infrastructure_services(ctx, arguments: dict) -> list:
 def handle_detect_lateral_movement_paths(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DETECT LATERAL MOVEMENT PATHS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:

@@ -27,7 +27,10 @@ _DEFAULT_LOG_LEVEL = "INFO"
 def _resolve_log_level() -> int:
     """Log level from MCP_LOG_LEVEL, falling back to INFO if unset or invalid."""
     raw = os.environ.get("MCP_LOG_LEVEL", _DEFAULT_LOG_LEVEL).strip().upper()
-    level = logging.getLevelNamesMapping().get(raw)
+    # NOTSET (0) is a valid name but means "defer to the parent"; with
+    # propagate=False that resolves to root's WARNING -- quieter than the
+    # documented INFO floor and not what the operator asked for.
+    level = None if raw == "NOTSET" else logging.getLevelNamesMapping().get(raw)
     if level is None:
         # Never fail startup over a typo, but never silently run at DEBUG either.
         logging.getLogger('illumio_mcp').warning(
@@ -52,7 +55,7 @@ def setup_logging():
     if os.environ.get('DOCKER_CONTAINER'):
         log_path = Path('/var/log/illumio-mcp/illumio-mcp.log')
     else:
-        # Use home directory for local logging
+        # Local runs log to the working directory
         log_path = './illumio-mcp.log'
     
     file_handler = logging.FileHandler(str(log_path))

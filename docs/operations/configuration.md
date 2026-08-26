@@ -80,9 +80,17 @@ If `MCP_ROLE_DEFAULT` is unset and a user's JWT groups match none of the configu
 |---|---|---|---|---|
 | `MCP_LOG_LEVEL` | Optional | `INFO` | Python log level name | `DEBUG` |
 
-Controls the level of the `illumio_mcp` diagnostic log (`./illumio-mcp.log`, or
-`/var/log/illumio-mcp/illumio-mcp.log` in Docker). Case-insensitive; an
-unrecognised value logs a warning and falls back to `INFO`.
+Controls the level of the `illumio_mcp` diagnostic log. Case-insensitive. An
+unrecognised value falls back to `INFO` and warns **on stderr** -- the warning is
+emitted before the file handler is attached, so it does not appear in the log
+file itself. `NOTSET` is rejected rather than honoured: it means "defer to the
+parent", which with `propagate=False` resolves to `WARNING`, quieter than the
+documented floor.
+
+The log path is `./illumio-mcp.log` (the working directory) unless the
+`DOCKER_CONTAINER` environment variable is set, in which case it is
+`/var/log/illumio-mcp/illumio-mcp.log`. The container image sets it; a container
+started without it writes to the working directory instead.
 
 **Leave this at `INFO` in production.** At `DEBUG` the tool handlers echo the
 full arguments of every call. Sensitive values (`api_key`, `api_secret`,

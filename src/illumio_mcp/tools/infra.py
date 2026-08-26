@@ -2,7 +2,7 @@ import json
 import logging
 import mcp.types as types
 from ..pce import PCE_ORG_ID
-from ..log_scrub import scrub_arguments_for_log
+from ..log_scrub import ScrubbedArgs
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -28,7 +28,7 @@ def handle_check_pce_connection(ctx, arguments: dict) -> list:
 def handle_get_events(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET EVENTS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -81,7 +81,7 @@ def handle_get_events(ctx, arguments: dict) -> list:
 def handle_get_pairing_profiles(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET PAIRING PROFILES CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:

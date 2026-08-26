@@ -1,7 +1,7 @@
 import json
 import logging
 import mcp.types as types
-from ..log_scrub import scrub_arguments_for_log
+from ..log_scrub import ScrubbedArgs
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -9,7 +9,7 @@ logger = logging.getLogger('illumio_mcp')
 def handle_create_deny_rule(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE DENY RULE CALLED")
-    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -125,7 +125,7 @@ def handle_create_deny_rule(ctx, arguments: dict) -> list:
         endpoint = f"{ruleset_href}/deny_rules"
 
         logger.debug(f"Creating {rule_type} rule at endpoint: {endpoint}")
-        logger.debug(f"Rule payload: {json.dumps(rule_payload, indent=2)}")
+        logger.debug("Rule payload: %s", ScrubbedArgs(rule_payload))
 
         resp = pce.post(endpoint, json=rule_payload)
         result = resp.json()
@@ -151,7 +151,7 @@ def handle_create_deny_rule(ctx, arguments: dict) -> list:
             )]
 
 def handle_update_deny_rule(ctx, arguments: dict) -> list:
-    logger.debug(f"UPDATE DENY RULE CALLED with arguments: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("UPDATE DENY RULE CALLED with arguments: %s", ScrubbedArgs(arguments))
 
     try:
         pce = ctx.pce
@@ -228,7 +228,7 @@ def handle_update_deny_rule(ctx, arguments: dict) -> list:
 
 
 def handle_delete_deny_rule(ctx, arguments: dict) -> list:
-    logger.debug(f"DELETE DENY RULE CALLED with arguments: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
+    logger.debug("DELETE DENY RULE CALLED with arguments: %s", ScrubbedArgs(arguments))
 
     try:
         pce = ctx.pce

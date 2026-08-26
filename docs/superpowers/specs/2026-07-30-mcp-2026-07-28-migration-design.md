@@ -59,7 +59,7 @@ checklist first.
 
 | Aspect | State |
 |---|---|
-| SDK | `mcp>=1.8.0` in `pyproject.toml:11`, resolved to **1.27.1**. Stale `requirements.txt:16` says `mcp==1.2.0` |
+| SDK | `mcp>=1.28.1,<2` in `pyproject.toml`, lock resolves **1.29.1**. (At audit time this was `>=1.8.0`/1.27.1 with a stale `requirements.txt` pinning `mcp==1.2.0`; both were fixed in `24660e3`.) |
 | API style | Low-level `mcp.server.Server` with decorators. No `FastMCP` anywhere |
 | Protocol version | **Never named in our source.** Entirely SDK-driven |
 | Transports | stdio + Streamable HTTP via `StreamableHTTPSessionManager(stateless=True)` (`transport/http.py:60-61`) |
@@ -86,7 +86,7 @@ This is the central finding of the audit and the reason this migration is tracta
 | Server-initiated `elicitation/create`, `sampling/createMessage`, `roots/list` | **None.** Exhaustive grep finds zero usage. Structurally impossible today — no `session`/`request_context` access anywhere |
 | `resources/subscribe` / `unsubscribe` → `subscriptions/listen` | **None.** Not registered |
 | `ping`, `logging/setLevel` | **None.** Not registered |
-| `notifications/message`, `notifications/progress` | **None.** Our `logging.setLevel` at `server.py:23,39` is stdlib Python logging to a file, never MCP |
+| `notifications/message`, `notifications/progress` | **None.** Our `logging.setLevel` at `server.py` (`setup_logging`) is stdlib Python logging to a file, never MCP |
 | Roots / Sampling / Logging deprecation (SEP-2577) | **None.** We use none of the three |
 | HTTP+SSE transport deprecation | **None.** We use Streamable HTTP |
 | DCR deprecation → Client ID Metadata Documents | **None.** We are a resource server, never a client. No `/register` endpoint |
@@ -399,7 +399,7 @@ Replace with the supported **range**, not a single revision, since one server no
 
 - `WWW-Authenticate` on **403** `insufficient_scope` responses (currently only on 401 —
   `auth/middleware.py:67-75`).
-- Delete or regenerate `requirements.txt` (says `mcp==1.2.0`).
+- ~~Delete or regenerate `requirements.txt`~~ — done in `24660e3` (file deleted).
 
 ---
 

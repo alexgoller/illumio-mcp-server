@@ -21,7 +21,8 @@ PCE_HOST=https://pce.example.com PCE_PORT=8443 PCE_ORG_ID=1 \
   API_KEY=mykey API_SECRET=mysecret python -m illumio_mcp
 ```
 
-The server starts, logs `Starting stdio server` to `illumio-mcp.log`, and exits cleanly when stdin closes.
+The server starts and exits cleanly when stdin closes. `Starting stdio server` is a DEBUG line, so it only
+appears in `illumio-mcp.log` when `MCP_LOG_LEVEL=DEBUG`; at the default `INFO` the log stays quiet.
 
 ---
 
