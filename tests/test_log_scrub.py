@@ -76,3 +76,83 @@ def test_no_secrets_when_serialized():
     assert "SENSITIVE_SECRET_ABC" not in serialized
     assert "SENSITIVE_TOKEN_123" not in serialized
     assert "fine-to-log" in serialized
+
+
+# ---------------------------------------------------------------------------
+# Handler-level scrubbing (2026-08 security review)
+#
+# The dispatcher scrubbed its own debug log, but every tool handler that logged
+# json.dumps(arguments) went straight around that control. Both requires_confirm
+# tools did exactly that, so single-use HMAC confirm tokens -- which authorise a
+# policy push -- were written to the log in plaintext.
+# ---------------------------------------------------------------------------
+
+import ast
+import json
+import pathlib
+
+from illumio_mcp.log_scrub import scrub_arguments_for_log
+
+
+def test_no_tool_handler_dumps_raw_arguments():
+    """No handler may serialise `arguments` without scrubbing it first.
+
+    A source-level guard rather than a behavioural one: the risk is a *new*
+    handler reintroducing the pattern, which only a grep-style check catches.
+    """
+    offenders = []
+    for path in sorted(pathlib.Path("src/illumio_mcp").rglob("*.py")):
+        if path.name == "log_scrub.py":
+            continue  # the module that defines the control describes the pattern
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "json.dumps(arguments" in line and "scrub_arguments_for_log" not in line:
+                offenders.append(f"{path}:{n}: {stripped}")
+    assert not offenders, "unscrubbed argument logging:\n  " + "\n  ".join(offenders)
+
+
+def test_confirm_token_never_survives_serialization():
+    """The exact payload shape the confirm-gated tools receive."""
+    args = {"scopes": [{"app": "pos"}], "_meta": {"confirm_token": "SECRET.TOKEN.VALUE"}}
+    assert "SECRET.TOKEN.VALUE" not in json.dumps(scrub_arguments_for_log(args))
+
+
+def test_scrubbing_recurses_into_nested_structures():
+    """Sensitive keys are redacted wherever they appear, not just at known spots."""
+    args = {"outer": {"inner": [{"api_secret": "nested-secret"}]}}
+    assert "nested-secret" not in json.dumps(scrub_arguments_for_log(args))
+
+
+def test_scrubbing_does_not_mutate_the_caller_arguments():
+    """Handlers log and then use `arguments`; redaction must not corrupt them."""
+    args = {"api_key": "real-key", "_meta": {"confirm_token": "real-token"}}
+    scrub_arguments_for_log(args)
+    assert args["api_key"] == "real-key"
+    assert args["_meta"]["confirm_token"] == "real-token"
+
+
+def test_log_level_defaults_to_info_not_debug(monkeypatch):
+    """DEBUG echoes full tool arguments, so it must be opt-in, not the default."""
+    import logging
+    from illumio_mcp.server import _resolve_log_level
+    monkeypatch.delenv("MCP_LOG_LEVEL", raising=False)
+    assert _resolve_log_level() == logging.INFO
+
+
+def test_log_level_is_configurable(monkeypatch):
+    import logging
+    from illumio_mcp.server import _resolve_log_level
+    monkeypatch.setenv("MCP_LOG_LEVEL", "debug")
+    assert _resolve_log_level() == logging.DEBUG
+    monkeypatch.setenv("MCP_LOG_LEVEL", "WARNING")
+    assert _resolve_log_level() == logging.WARNING
+
+
+def test_invalid_log_level_falls_back_to_info(monkeypatch):
+    """A typo must not silently leave the server running at DEBUG."""
+    import logging
+    from illumio_mcp.server import _resolve_log_level
+    monkeypatch.setenv("MCP_LOG_LEVEL", "verbose-please")
+    assert _resolve_log_level() == logging.INFO

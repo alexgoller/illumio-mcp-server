@@ -4,6 +4,7 @@ import pandas as pd
 import mcp.types as types
 from illumio import Label, Workload, Interface
 from .constants import MCP_MAX_RESPONSE_BYTES
+from ..log_scrub import scrub_arguments_for_log
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -155,7 +156,7 @@ def _format_labels_only(workloads, label_map):
 def handle_get_workloads(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET WORKLOADS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     logger.debug("=" * 80)
 
     try:
@@ -244,7 +245,7 @@ def handle_create_workload(ctx, arguments: dict) -> list:
 
 
 def handle_update_workload(ctx, arguments: dict) -> list:
-    logger.debug(f"UPDATE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"UPDATE WORKLOAD CALLED with arguments: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     try:
         pce = ctx.pce
 
@@ -307,7 +308,7 @@ def handle_update_workload(ctx, arguments: dict) -> list:
 
 
 def handle_delete_workload(ctx, arguments: dict) -> list:
-    logger.debug(f"DELETE WORKLOAD CALLED with arguments: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"DELETE WORKLOAD CALLED with arguments: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     try:
         pce = ctx.pce
 

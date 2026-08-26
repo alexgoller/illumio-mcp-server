@@ -74,6 +74,28 @@ If `MCP_ROLE_DEFAULT` is unset and a user's JWT groups match none of the configu
 
 ---
 
+## Diagnostic logging
+
+| Var | Required when | Default | Format | Example |
+|---|---|---|---|---|
+| `MCP_LOG_LEVEL` | Optional | `INFO` | Python log level name | `DEBUG` |
+
+Controls the level of the `illumio_mcp` diagnostic log (`./illumio-mcp.log`, or
+`/var/log/illumio-mcp/illumio-mcp.log` in Docker). Case-insensitive; an
+unrecognised value logs a warning and falls back to `INFO`.
+
+**Leave this at `INFO` in production.** At `DEBUG` the tool handlers echo the
+full arguments of every call. Sensitive values (`api_key`, `api_secret`,
+`confirm_token`) are redacted before they reach the log, but the remaining
+payload still describes your policy and workload topology in detail, and the
+log file is long-lived on disk. `DEBUG` should be a deliberate, temporary
+choice while diagnosing a problem.
+
+This is a separate concern from MCP protocol logging: the server never sends
+`notifications/message` to clients.
+
+---
+
 ## Audit log
 
 | Var | Required when | Default | Format | Example |

@@ -8,6 +8,7 @@ from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
 from ..pce import run_sync
 from .constants import MCP_BUG_MAX_RESULTS, MCP_MAX_RESPONSE_BYTES
+from ..log_scrub import scrub_arguments_for_log
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -204,7 +205,7 @@ def summarize_traffic(df):
 def handle_get_traffic_flows(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET TRAFFIC FLOWS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
 
     # assume a default start date of 1 day ago and end date of now
     if 'start_date' not in arguments:
@@ -301,7 +302,7 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
 def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET TRAFFIC FLOWS SUMMARY CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     logger.debug(f"Start Date: {arguments.get('start_date')}")
     logger.debug(f"End Date: {arguments.get('end_date')}")
     logger.debug(f"Include Sources: {arguments.get('include_sources', [])}")
@@ -379,7 +380,7 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
 def handle_find_unmanaged_traffic(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("FIND UNMANAGED TRAFFIC CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     logger.debug("=" * 80)
 
     try:

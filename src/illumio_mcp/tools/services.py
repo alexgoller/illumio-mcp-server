@@ -1,6 +1,7 @@
 import json
 import logging
 import mcp.types as types
+from ..log_scrub import scrub_arguments_for_log
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -8,7 +9,7 @@ logger = logging.getLogger('illumio_mcp')
 def handle_get_services(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET SERVICES CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"Arguments received: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     logger.debug("=" * 80)
 
     try:
@@ -100,7 +101,7 @@ def handle_get_services(ctx, arguments: dict) -> list:
 
 
 def handle_create_service(ctx, arguments: dict) -> list:
-    logger.debug(f"CREATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"CREATE SERVICE CALLED with arguments: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     try:
         pce = ctx.pce
 
@@ -125,7 +126,7 @@ def handle_create_service(ctx, arguments: dict) -> list:
 
 
 def handle_update_service(ctx, arguments: dict) -> list:
-    logger.debug(f"UPDATE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"UPDATE SERVICE CALLED with arguments: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     try:
         pce = ctx.pce
 
@@ -170,7 +171,7 @@ def handle_update_service(ctx, arguments: dict) -> list:
 
 
 def handle_delete_service(ctx, arguments: dict) -> list:
-    logger.debug(f"DELETE SERVICE CALLED with arguments: {json.dumps(arguments, indent=2)}")
+    logger.debug(f"DELETE SERVICE CALLED with arguments: {json.dumps(scrub_arguments_for_log(arguments), indent=2)}")
     try:
         pce = ctx.pce
 

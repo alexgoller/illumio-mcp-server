@@ -17,10 +17,31 @@ from .tools import TOOL_REGISTRY
 from .auth.audit import AuditEntry, NullAuditLog
 
 
+# Default to INFO, not DEBUG. Handler debug logs echo full tool arguments, so
+# DEBUG must be an explicit operator decision rather than the out-of-the-box
+# behaviour. Arguments are scrubbed (see log_scrub) but stay verbose, and the
+# log file is long-lived on disk.
+_DEFAULT_LOG_LEVEL = "INFO"
+
+
+def _resolve_log_level() -> int:
+    """Log level from MCP_LOG_LEVEL, falling back to INFO if unset or invalid."""
+    raw = os.environ.get("MCP_LOG_LEVEL", _DEFAULT_LOG_LEVEL).strip().upper()
+    level = logging.getLevelNamesMapping().get(raw)
+    if level is None:
+        # Never fail startup over a typo, but never silently run at DEBUG either.
+        logging.getLogger('illumio_mcp').warning(
+            "Unrecognised MCP_LOG_LEVEL %r; falling back to %s", raw, _DEFAULT_LOG_LEVEL
+        )
+        level = logging.getLevelNamesMapping()[_DEFAULT_LOG_LEVEL]
+    return level
+
+
 def setup_logging():
     """Configure logging based on environment"""
     logger = logging.getLogger('illumio_mcp')
-    logger.setLevel(logging.DEBUG)
+    level = _resolve_log_level()
+    logger.setLevel(level)
     
     # Create formatter
     formatter = logging.Formatter(
@@ -36,7 +57,7 @@ def setup_logging():
     
     file_handler = logging.FileHandler(str(log_path))
     file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(level)
     logger.addHandler(file_handler)
     
     # Prevent logs from propagating to root logger
@@ -3261,29 +3282,10 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
         ),
     ]
 
-# Argument keys whose values must NEVER appear in logs. Verified by
-# tests/test_log_scrub.py. When adding a new sensitive arg, add it here too.
-_SENSITIVE_ARG_KEYS = frozenset({"api_key", "api_secret", "confirm_token"})
-
-
-def _scrub_arguments_for_log(arguments: dict | None) -> dict:
-    """Return a copy of `arguments` with sensitive values replaced by '***'.
-
-    Recurses one level into a `_meta` sub-dict (where `confirm_token` lives)
-    but does not deep-recurse arbitrary structures — sensitive args in
-    Phase 1-3e all live at the top level or in `_meta`.
-    """
-    if not arguments:
-        return {}
-    scrubbed: dict = {}
-    for k, v in arguments.items():
-        if k in _SENSITIVE_ARG_KEYS:
-            scrubbed[k] = "***"
-        elif k == "_meta" and isinstance(v, dict):
-            scrubbed[k] = {ik: ("***" if ik in _SENSITIVE_ARG_KEYS else iv) for ik, iv in v.items()}
-        else:
-            scrubbed[k] = v
-    return scrubbed
+# Sensitive-argument redaction lives in log_scrub so tool handlers can use it
+# too; these aliases keep the existing import surface stable.
+from .log_scrub import SENSITIVE_ARG_KEYS as _SENSITIVE_ARG_KEYS  # noqa: E402
+from .log_scrub import scrub_arguments_for_log as _scrub_arguments_for_log  # noqa: E402
 
 
 @server.call_tool()
