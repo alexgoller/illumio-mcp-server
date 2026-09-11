@@ -1,3 +1,9 @@
+---
+title: HTTP mode
+layout: default
+parent: Operations
+---
+
 # HTTP Mode
 
 The HTTP transport exposes the MCP server over Streamable HTTP (MCP spec rev 2025-03-26), allowing any compliant MCP client to connect by URL rather than requiring a local subprocess install.

@@ -2,6 +2,8 @@
 
 # Illumio MCP Server
 
+**📚 [Documentation site](https://alexgoller.github.io/illumio-mcp-server)** — installation, getting started, workflows, the full tool reference, and central deployment.
+
 A Model Context Protocol (MCP) server that provides an interface to interact with Illumio PCE (Policy Compute Engine). This server enables programmatic access to Illumio workload management, label operations, traffic flow analysis, automated ringfencing, and infrastructure service identification.
 
 <a href="https://glama.ai/mcp/servers/xhqzxlo9iy">

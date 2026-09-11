@@ -1,3 +1,10 @@
+---
+title: Auth0
+layout: default
+parent: OAuth providers
+grand_parent: Operations
+---
+
 # Auth0 — OAuth Setup
 
 This is a briefer guide for Auth0. Verify steps with your IdP admin — Auth0's UI evolves frequently.

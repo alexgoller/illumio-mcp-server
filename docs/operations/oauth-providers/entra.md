@@ -1,3 +1,10 @@
+---
+title: Entra
+layout: default
+parent: OAuth providers
+grand_parent: Operations
+---
+
 # Microsoft Entra ID (Azure AD) — OAuth Setup
 
 This is the most-tested IdP integration. These instructions register the MCP server as a protected resource and configure MCP clients to authenticate against your Entra tenant.

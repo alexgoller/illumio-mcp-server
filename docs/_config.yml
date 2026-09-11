@@ -1,0 +1,40 @@
+title: Illumio MCP Server
+description: Manage Illumio PCE segmentation from any MCP client — 46 tools, guided workflows, and an embedded segmentation knowledge base.
+remote_theme: just-the-docs/just-the-docs@v0.10.1
+url: https://alexgoller.github.io
+baseurl: /illumio-mcp-server
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+
+# Internal planning specs are not part of the published documentation.
+exclude:
+  - superpowers/
+  - README.md
+
+color_scheme: dark
+search_enabled: true
+heading_anchors: true
+
+aux_links:
+  GitHub: https://github.com/alexgoller/illumio-mcp-server
+
+nav_external_links:
+  - title: View on GitHub
+    url: https://github.com/alexgoller/illumio-mcp-server
+
+callouts:
+  warning:
+    title: Warning
+    color: red
+  note:
+    title: Note
+    color: blue
+  caution:
+    title: Caution
+    color: yellow
+
+footer_content: >
+  Community project, not an official Illumio product.
+  Licensed under GPL-3.0.

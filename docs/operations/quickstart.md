@@ -1,3 +1,9 @@
+---
+title: Quickstart
+layout: default
+parent: Operations
+---
+
 # Quickstart
 
 Three paths to a running server. Pick the one that matches your goal.

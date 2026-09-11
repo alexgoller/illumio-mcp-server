@@ -1,3 +1,9 @@
+---
+title: stdio mode
+layout: default
+parent: Operations
+---
+
 # Stdio Mode
 
 Stdio is the default transport. The MCP client launches the server as a subprocess over stdin/stdout. No network port opens, no auth is required — the OS user who launched the process is implicitly trusted.

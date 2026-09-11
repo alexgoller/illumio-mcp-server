@@ -1,3 +1,9 @@
+---
+title: Security review (2026-05-13)
+layout: default
+parent: Security
+---
+
 # Security Review: illumio-mcp-server v0.2.0
 
 **Scope:** External-facing HTTP + auth + crypto + persistence surfaces (transport/*, auth/*, server.py dispatcher, tools/credentials.py).

@@ -1,3 +1,5 @@
+<!-- Not published: docs/_config.yml excludes this file. The site landing page is docs/index.md. -->
+
 # Illumio MCP Server — Documentation
 
 This directory contains the full operator, security, and developer documentation for the Illumio MCP Server after the Phase 1-3e rollout. For a top-level feature overview, see the [project README](../README.md).

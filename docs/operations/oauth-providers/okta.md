@@ -1,3 +1,10 @@
+---
+title: Okta
+layout: default
+parent: OAuth providers
+grand_parent: Operations
+---
+
 # Okta — OAuth Setup
 
 This guide sets up Okta as the Authorization Server for the MCP server. The approach uses a Custom Authorization Server (recommended over the Org AS for API access).

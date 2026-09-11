@@ -1,3 +1,9 @@
+---
+title: Architecture
+layout: default
+parent: Security
+---
+
 # Security Architecture
 
 ## Five-layer defense

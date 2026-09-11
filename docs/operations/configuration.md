@@ -1,3 +1,9 @@
+---
+title: Configuration reference
+layout: default
+parent: Operations
+---
+
 # Configuration Reference
 
 Every environment variable the server understands. In stdio mode only the first group applies. All other groups are for HTTP deployments.

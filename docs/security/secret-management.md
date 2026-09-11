@@ -1,3 +1,9 @@
+---
+title: Secret management
+layout: default
+parent: Security
+---
+
 # Secret Management
 
 How each secret should be generated, stored, and rotated.

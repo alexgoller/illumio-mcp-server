@@ -1,3 +1,9 @@
+---
+title: Testing
+layout: default
+parent: Development
+---
+
 # Testing
 
 Three tiers of tests. Most work without a real PCE.

@@ -1,3 +1,9 @@
+---
+title: Audit log
+layout: default
+parent: Operations
+---
+
 # Audit Log
 
 The audit log is the authoritative record of "who called what tool and whether it was allowed." It is written by the dispatcher for every tool-call decision in HTTP auth mode.

@@ -57,3 +57,20 @@ def test_count_matches_expected():
     add or remove a tool."""
     assert len(TOOL_REGISTRY) == 46, \
         f"Tool count drifted to {len(TOOL_REGISTRY)}; update this test if intentional"
+
+
+def test_published_tool_reference_is_current():
+    """docs/tools.md is generated; regenerate it when the registry changes.
+
+    Run: .venv/bin/python scripts/gen_tool_docs.py
+    """
+    import pathlib
+    import subprocess
+    import sys
+
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, str(repo / "scripts" / "gen_tool_docs.py"), "--check"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
