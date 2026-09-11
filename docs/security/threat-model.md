@@ -1,3 +1,9 @@
+---
+title: Threat model
+layout: default
+parent: Security
+---
+
 # Threat Model
 
 What the Phase 1-3e design protects against, what it does not protect against, and the honest trade-offs operators need to understand before deploying.

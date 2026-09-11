@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]   # pyproject: requires-python >=3.12,<3.14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --python ${{ matrix.python }}
+
+      # No PCE is reachable from CI. That is deliberate: PCE-dependent tests opt
+      # in via the `requires_pce` fixture and skip with a reason, while the rest
+      # of the suite runs. Before that fixture existed, a missing PCE errored
+      # every test in tests/ and CI was impossible.
+      #
+      # The pass-count floor guards the other direction: if PCE-gating regressed
+      # and everything skipped, the suite would still be "green" while proving
+      # nothing.
+      - name: Run test suite
+        run: |
+          set -o pipefail
+          uv run --frozen pytest tests/ -q --ignore=tests/timing_test.py -rs \
+            | tee /tmp/pytest.out
+          passed=$(grep -oE '[0-9]+ passed' /tmp/pytest.out | tail -1 | grep -oE '[0-9]+')
+          echo "passed=${passed:-0}"
+          if [ "${passed:-0}" -lt 150 ]; then
+            echo "::error::Only ${passed:-0} tests ran; expected ~172 without a PCE."
+            exit 1
+          fi
+
+  docs:
+    name: generated docs current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: docs/tools.md matches the tool registry
+        run: uv run --frozen python scripts/gen_tool_docs.py --check
+
+  audit:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: OSV advisory check
+        run: uv run --frozen python scripts/audit_deps.py

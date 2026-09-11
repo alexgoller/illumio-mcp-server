@@ -17,10 +17,34 @@ from .tools import TOOL_REGISTRY
 from .auth.audit import AuditEntry, NullAuditLog
 
 
+# Default to INFO, not DEBUG. Handler debug logs echo full tool arguments, so
+# DEBUG must be an explicit operator decision rather than the out-of-the-box
+# behaviour. Arguments are scrubbed (see log_scrub) but stay verbose, and the
+# log file is long-lived on disk.
+_DEFAULT_LOG_LEVEL = "INFO"
+
+
+def _resolve_log_level() -> int:
+    """Log level from MCP_LOG_LEVEL, falling back to INFO if unset or invalid."""
+    raw = os.environ.get("MCP_LOG_LEVEL", _DEFAULT_LOG_LEVEL).strip().upper()
+    # NOTSET (0) is a valid name but means "defer to the parent"; with
+    # propagate=False that resolves to root's WARNING -- quieter than the
+    # documented INFO floor and not what the operator asked for.
+    level = None if raw == "NOTSET" else logging.getLevelNamesMapping().get(raw)
+    if level is None:
+        # Never fail startup over a typo, but never silently run at DEBUG either.
+        logging.getLogger('illumio_mcp').warning(
+            "Unrecognised MCP_LOG_LEVEL %r; falling back to %s", raw, _DEFAULT_LOG_LEVEL
+        )
+        level = logging.getLevelNamesMapping()[_DEFAULT_LOG_LEVEL]
+    return level
+
+
 def setup_logging():
     """Configure logging based on environment"""
     logger = logging.getLogger('illumio_mcp')
-    logger.setLevel(logging.DEBUG)
+    level = _resolve_log_level()
+    logger.setLevel(level)
     
     # Create formatter
     formatter = logging.Formatter(
@@ -31,12 +55,12 @@ def setup_logging():
     if os.environ.get('DOCKER_CONTAINER'):
         log_path = Path('/var/log/illumio-mcp/illumio-mcp.log')
     else:
-        # Use home directory for local logging
+        # Local runs log to the working directory
         log_path = './illumio-mcp.log'
     
     file_handler = logging.FileHandler(str(log_path))
     file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(level)
     logger.addHandler(file_handler)
     
     # Prevent logs from propagating to root logger
@@ -107,6 +131,24 @@ def reset_http_context(token: contextvars.Token) -> None:
     _http_context.reset(token)
 
 
+def _env_pce_or_none(context: str):
+    """Env-configured PCE client, or None if one cannot be built.
+
+    Returning None rather than raising is deliberate. Protocol-level requests
+    such as tools/list need no PCE at all, and a server with no PCE configured
+    must not answer them with a 500. When a tool genuinely needs a PCE, the
+    dispatcher's own gate turns `pce=None` into a clean `no_credentials` tool
+    error -- the same treatment the per_user branch already gives a failed
+    keystore lookup.
+    """
+    try:
+        return get_pce_from_env()
+    except Exception:
+        logger.warning("No usable PCE configuration (%s); "
+                       "PCE-backed tools will report no_credentials", context)
+        return None
+
+
 def build_http_context_for(
     user_sub: str | None,
     user_iss: str | None,
@@ -127,7 +169,7 @@ def build_http_context_for(
     if pce_mode == "shared":
         # Shared service-account mode: every authenticated user uses the same
         # env-loaded PCE. SSO + role + audit + confirm still enforced.
-        pce = get_pce_from_env()
+        pce = _env_pce_or_none("shared mode")
     else:
         # per_user mode (Phase 3b)
         pce = None
@@ -141,7 +183,7 @@ def build_http_context_for(
                 logger.exception("Failed to load PCE credentials for user %s", user_sub)
         elif keystore is None:
             # Dev-insecure mode: no keystore, fall back to env-loaded PCE
-            pce = get_pce_from_env()
+            pce = _env_pce_or_none("dev-insecure mode")
     return ToolContext(
         pce=pce,
         is_stdio=False,
@@ -2179,7 +2221,7 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "description": "Filter by label key/type (e.g., 'role', 'app', 'env', 'loc')"},
+                    "key": {"type": "string", "description": "Filter by label key/type, matched exactly (e.g., 'role', 'app', 'env', 'loc'). 'role' will not match 'servicerole'"},
                     "value": {"type": "string", "description": "Filter by label value (supports partial matches)"},
                     "max_results": {"type": "integer", "description": "Maximum number of labels to return"},
                     "include_deleted": {"type": "boolean", "description": "Include deleted labels"},
@@ -3261,29 +3303,10 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
         ),
     ]
 
-# Argument keys whose values must NEVER appear in logs. Verified by
-# tests/test_log_scrub.py. When adding a new sensitive arg, add it here too.
-_SENSITIVE_ARG_KEYS = frozenset({"api_key", "api_secret", "confirm_token"})
-
-
-def _scrub_arguments_for_log(arguments: dict | None) -> dict:
-    """Return a copy of `arguments` with sensitive values replaced by '***'.
-
-    Recurses one level into a `_meta` sub-dict (where `confirm_token` lives)
-    but does not deep-recurse arbitrary structures — sensitive args in
-    Phase 1-3e all live at the top level or in `_meta`.
-    """
-    if not arguments:
-        return {}
-    scrubbed: dict = {}
-    for k, v in arguments.items():
-        if k in _SENSITIVE_ARG_KEYS:
-            scrubbed[k] = "***"
-        elif k == "_meta" and isinstance(v, dict):
-            scrubbed[k] = {ik: ("***" if ik in _SENSITIVE_ARG_KEYS else iv) for ik, iv in v.items()}
-        else:
-            scrubbed[k] = v
-    return scrubbed
+# Sensitive-argument redaction lives in log_scrub so tool handlers can use it
+# too; these aliases keep the existing import surface stable.
+from .log_scrub import SENSITIVE_ARG_KEYS as _SENSITIVE_ARG_KEYS  # noqa: E402
+from .log_scrub import scrub_arguments_for_log as _scrub_arguments_for_log  # noqa: E402
 
 
 @server.call_tool()

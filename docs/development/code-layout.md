@@ -1,3 +1,9 @@
+---
+title: Code layout
+layout: default
+parent: Development
+---
+
 # Code Layout
 
 Overview of the package structure for contributors. Every module has a single well-defined responsibility.

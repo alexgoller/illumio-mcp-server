@@ -1,3 +1,9 @@
+---
+title: Configuration reference
+layout: default
+parent: Operations
+---
+
 # Configuration Reference
 
 Every environment variable the server understands. In stdio mode only the first group applies. All other groups are for HTTP deployments.
@@ -71,6 +77,36 @@ Configure which IdP groups grant which MCP roles. Users are granted the highest 
 | `MCP_ROLE_DEFAULT` | Optional | unset (refuse) | `reader`, `operator`, or `admin` | `reader` |
 
 If `MCP_ROLE_DEFAULT` is unset and a user's JWT groups match none of the configured lists, the user receives a `forbidden_no_role` error and the call is denied.
+
+---
+
+## Diagnostic logging
+
+| Var | Required when | Default | Format | Example |
+|---|---|---|---|---|
+| `MCP_LOG_LEVEL` | Optional | `INFO` | Python log level name | `DEBUG` |
+
+Controls the level of the `illumio_mcp` diagnostic log. Case-insensitive. An
+unrecognised value falls back to `INFO` and warns **on stderr** -- the warning is
+emitted before the file handler is attached, so it does not appear in the log
+file itself. `NOTSET` is rejected rather than honoured: it means "defer to the
+parent", which with `propagate=False` resolves to `WARNING`, quieter than the
+documented floor.
+
+The log path is `./illumio-mcp.log` (the working directory) unless the
+`DOCKER_CONTAINER` environment variable is set, in which case it is
+`/var/log/illumio-mcp/illumio-mcp.log`. The container image sets it; a container
+started without it writes to the working directory instead.
+
+**Leave this at `INFO` in production.** At `DEBUG` the tool handlers echo the
+full arguments of every call. Sensitive values (`api_key`, `api_secret`,
+`confirm_token`) are redacted before they reach the log, but the remaining
+payload still describes your policy and workload topology in detail, and the
+log file is long-lived on disk. `DEBUG` should be a deliberate, temporary
+choice while diagnosing a problem.
+
+This is a separate concern from MCP protocol logging: the server never sends
+`notifications/message` to clients.
 
 ---
 

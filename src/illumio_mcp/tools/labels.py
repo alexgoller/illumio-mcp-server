@@ -25,6 +25,23 @@ def handle_get_labels(ctx, arguments: dict) -> list:
 
         resp = pce.get('/labels', params=params)
         labels = resp.json()
+
+        # The PCE matches ?key= as a substring, so ?key=role also returns
+        # 'servicerole' labels. Label keys are a small fixed set of dimensions
+        # (role/app/env/loc/...), and this tool documents `key` as a dimension
+        # selector -- unlike `value`, which documents partial matching and is
+        # left untouched. Narrow to an exact key match here.
+        #
+        # Note: the PCE applies max_results before we filter, so a request that
+        # both sets max_results and hits the cap may return fewer exact matches
+        # than exist. Raise max_results if you need exhaustive results.
+        requested_key = arguments.get('key')
+        if requested_key:
+            labels = [
+                label for label in labels
+                if isinstance(label, dict) and label.get('key') == requested_key
+            ]
+
         return [types.TextContent(
             type="text",
             text=f"Labels: {labels}"

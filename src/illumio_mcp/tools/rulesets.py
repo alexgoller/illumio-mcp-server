@@ -2,12 +2,13 @@ import json
 import logging
 import mcp.types as types
 from illumio import RuleSet, LabelSet, Rule, AMS, ServicePort
+from ..log_scrub import ScrubbedArgs
 
 logger = logging.getLogger('illumio_mcp')
 
 
 def handle_get_rulesets(ctx, arguments: dict) -> list:
-    logger.debug(f"GET RULESETS CALLED with arguments: {json.dumps(arguments, indent=2)}")
+    logger.debug("GET RULESETS CALLED with arguments: %s", ScrubbedArgs(arguments))
     try:
         pce = ctx.pce
 
@@ -88,7 +89,7 @@ def handle_get_rulesets(ctx, arguments: dict) -> list:
 def handle_create_ruleset(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE RULESET CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -129,7 +130,7 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
         # Handle scopes
         label_sets = []
         if arguments.get("scopes"):
-            logger.debug(f"Processing scopes: {json.dumps(arguments['scopes'], indent=2)}")
+            logger.debug("Processing scopes: %s", ScrubbedArgs(arguments, 'scopes'))
 
             for scope in arguments["scopes"]:
                 label_set = LabelSet(labels=[])
@@ -174,10 +175,10 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
         # Create rules if provided
         created_rules = []
         if arguments.get("rules"):
-            logger.debug(f"Processing rules: {json.dumps(arguments['rules'], indent=2)}")
+            logger.debug("Processing rules: %s", ScrubbedArgs(arguments, 'rules'))
 
             for rule_def in arguments["rules"]:
-                logger.debug(f"Processing rule: {json.dumps(rule_def, indent=2)}")
+                logger.debug("Processing rule: %s", ScrubbedArgs(rule_def))
 
                 # Process providers
                 providers = []
@@ -329,7 +330,7 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
 def handle_update_ruleset(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE RULESET CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -368,7 +369,7 @@ def handle_update_ruleset(ctx, arguments: dict) -> list:
 
         # Handle scopes if provided
         if "scopes" in arguments:
-            logger.debug(f"Processing scopes: {json.dumps(arguments['scopes'], indent=2)}")
+            logger.debug("Processing scopes: %s", ScrubbedArgs(arguments, 'scopes'))
             label_sets = []
 
             for scope in arguments["scopes"]:
@@ -445,7 +446,7 @@ def handle_update_ruleset(ctx, arguments: dict) -> list:
 def handle_delete_ruleset(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DELETE RULESET CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -499,7 +500,7 @@ def handle_delete_ruleset(ctx, arguments: dict) -> list:
 def handle_provision_policy(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("PROVISION POLICY CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:

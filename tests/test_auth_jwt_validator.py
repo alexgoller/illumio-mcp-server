@@ -142,3 +142,31 @@ def test_scope_can_be_a_list_or_space_separated(validator, private_key_pem):
 def test_garbage_token_rejected(validator):
     with pytest.raises(InvalidTokenError):
         validator.validate("not-a-jwt")
+
+
+# ----- auth_time: consumed by the POST /confirm fresh-auth gate -----
+
+def test_auth_time_is_extracted(validator, private_key_pem):
+    """Without this, the /confirm fresh-auth gate can never pass: it reads
+    user.auth_time, which was never populated, and fails closed with 403."""
+    now = int(time.time())
+    user = validator.validate(_mint(private_key_pem, auth_time=now - 30))
+    assert user.auth_time == now - 30
+
+
+def test_auth_time_absent_is_none(validator, private_key_pem):
+    """auth_time is optional in OIDC. Absent must not break validation."""
+    assert validator.validate(_mint(private_key_pem)).auth_time is None
+
+
+def test_auth_time_accepts_string_form(validator, private_key_pem):
+    """Spec'd as NumericDate, but IdPs have been seen sending a string."""
+    assert validator.validate(_mint(private_key_pem, auth_time="1700000000")).auth_time == 1700000000
+
+
+def test_malformed_auth_time_treated_as_absent(validator, private_key_pem):
+    """A junk auth_time must not fail token validation outright -- it is not
+    required for validity, and the fresh-auth gate already fails closed on None."""
+    for junk in ("yesterday", None, [], {}, True):
+        user = validator.validate(_mint(private_key_pem, auth_time=junk))
+        assert user.auth_time is None, f"expected None for {junk!r}, got {user.auth_time!r}"

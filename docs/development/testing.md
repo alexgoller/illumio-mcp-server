@@ -1,3 +1,17 @@
+---
+title: Testing
+layout: default
+parent: Development
+---
+
+{: .note }
+> **CI.** `.github/workflows/ci.yml` runs the suite on Python 3.12 and 3.13 for every
+> push to `main` and every pull request. CI has no PCE, so PCE-dependent tests skip via
+> the `requires_pce` fixture while the rest run — roughly 172 tests. The job fails if
+> fewer than 150 pass, so a regression in the PCE gating cannot turn the suite into a
+> silently empty green run. Two further jobs check that `docs/tools.md` still matches the
+> tool registry and that no dependency carries a known OSV advisory.
+
 # Testing
 
 Three tiers of tests. Most work without a real PCE.
@@ -166,7 +180,8 @@ These tests create and clean up real PCE objects (workloads, labels, rulesets). 
 To run the PCE-free tiers from CI while skipping the PCE tests:
 
 ```bash
-.venv/bin/python3 -m pytest tests/ -q --ignore=tests/test_mcp_tools.py
+# PCE-dependent tests skip automatically when no PCE is reachable.
+.venv/bin/python3 -m pytest tests/ -q
 ```
 
 ---
@@ -177,8 +192,8 @@ To run the PCE-free tiers from CI while skipping the PCE tests:
 # With PCE configured in .env
 .venv/bin/python3 -m pytest tests/ -v
 
-# Without PCE (skips test_mcp_tools.py)
-.venv/bin/python3 -m pytest tests/ -q --ignore=tests/test_mcp_tools.py
+# Without PCE: the requires_pce fixture skips PCE-dependent tests with a reason.
+.venv/bin/python3 -m pytest tests/ -q
 ```
 
 Expected CI output (no PCE):

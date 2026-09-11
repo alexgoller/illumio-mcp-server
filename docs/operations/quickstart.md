@@ -1,3 +1,9 @@
+---
+title: Quickstart
+layout: default
+parent: Operations
+---
+
 # Quickstart
 
 Three paths to a running server. Pick the one that matches your goal.
@@ -55,7 +61,7 @@ See [stdio-mode.md](stdio-mode.md) for the full Cursor config and Docker variant
 
 Use this for local integration testing with MCP Inspector or to verify the HTTP transport before wiring up OAuth.
 
-**Prerequisites:** `starlette`, `uvicorn`, and `mcp>=1.8.0` (installed automatically with `pip install -e .`).
+**Prerequisites:** `starlette`, `uvicorn`, and `mcp>=1.28.1,<2` (installed automatically with `pip install -e .`).
 
 ```bash
 # Start the server on localhost (refuses to bind 0.0.0.0 without this flag)

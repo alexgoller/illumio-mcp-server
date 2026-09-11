@@ -1,12 +1,13 @@
 import json
 import logging
 import mcp.types as types
+from ..log_scrub import ScrubbedArgs
 
 logger = logging.getLogger('illumio_mcp')
 
 
 def handle_get_iplists(ctx, arguments: dict) -> list:
-    logger.debug(f"GET IP LISTS CALLED with arguments: {json.dumps(arguments, indent=2)}")
+    logger.debug("GET IP LISTS CALLED with arguments: %s", ScrubbedArgs(arguments))
     try:
         pce = ctx.pce
 
@@ -43,7 +44,7 @@ def handle_get_iplists(ctx, arguments: dict) -> list:
 def handle_create_iplist(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE IP LIST CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -131,7 +132,7 @@ def handle_create_iplist(ctx, arguments: dict) -> list:
 def handle_update_iplist(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("UPDATE IP LIST CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -232,7 +233,7 @@ def handle_update_iplist(ctx, arguments: dict) -> list:
 def handle_delete_iplist(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("DELETE IP LIST CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:

@@ -8,6 +8,7 @@ from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
 from .traffic import to_dataframe
 from .constants import MCP_BUG_MAX_RESULTS
+from ..log_scrub import ScrubbedArgs
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -15,7 +16,7 @@ logger = logging.getLogger('illumio_mcp')
 def handle_compliance_check(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("COMPLIANCE CHECK CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -332,7 +333,7 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
 def handle_enforcement_readiness(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("ENFORCEMENT READINESS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -518,7 +519,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
 def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET POLICY COVERAGE REPORT CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -654,7 +655,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
 def handle_compare_draft_active(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("COMPARE DRAFT ACTIVE CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:
@@ -733,7 +734,7 @@ def handle_compare_draft_active(ctx, arguments: dict) -> list:
 def handle_get_workload_enforcement_status(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET WORKLOAD ENFORCEMENT STATUS CALLED")
-    logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+    logger.debug("Arguments received: %s", ScrubbedArgs(arguments))
     logger.debug("=" * 80)
 
     try:

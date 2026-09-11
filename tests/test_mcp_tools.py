@@ -1,7 +1,10 @@
 """Integration tests for the Illumio MCP server.
 
-These tests run against a real PCE using the MCP protocol.
+These tests drive real CRUD against a real PCE over the MCP protocol, and are
+skipped when no PCE is reachable (see the `requires_pce` fixture in conftest).
 Requires .env with PCE_HOST, PCE_PORT, PCE_ORG_ID, API_KEY, API_SECRET.
+
+Protocol-surface tests that need no PCE live in `test_mcp_protocol.py`.
 
 Run with: .venv/bin/python3 -m pytest tests/ -v
 """
@@ -12,7 +15,7 @@ from mcp.client.stdio import stdio_client
 from conftest import get_server_params
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("requires_pce")]
 
 
 # ---------------------------------------------------------------------------
@@ -44,56 +47,6 @@ def assert_no_error(data, context=""):
 
 # ---------------------------------------------------------------------------
 # Tool listing
-# ---------------------------------------------------------------------------
-
-class TestToolListing:
-    async def test_list_tools_returns_all_expected(self):
-        async with stdio_client(get_server_params()) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-                tool_names = sorted([t.name for t in result.tools])
-                expected = sorted([
-                    "check-pce-connection",
-                    "get-workloads", "create-workload", "update-workload", "delete-workload",
-                    "get-labels", "create-label", "update-label", "delete-label",
-                    "get-rulesets", "create-ruleset", "update-ruleset", "delete-ruleset",
-                    "create-deny-rule", "update-deny-rule", "delete-deny-rule",
-                    "get-iplists", "create-iplist", "update-iplist", "delete-iplist",
-                    "get-services", "create-service", "update-service", "delete-service",
-                    "get-traffic-flows", "get-traffic-flows-summary",
-                    "get-events",
-                    "create-ringfence",
-                    "identify-infrastructure-services",
-                    "provision-policy",
-                    "compare-draft-active",
-                    "enforcement-readiness",
-                    "ringfence-batch",
-                    "get-workload-enforcement-status",
-                    "get-policy-coverage-report",
-                    "find-unmanaged-traffic",
-                    "detect-lateral-movement-paths",
-                    "compliance-check",
-                    "get-kubernetes-workloads", "get-pairing-profiles", "update-container-workload-profile", "get-container-workload-profiles", "get-container-clusters"
-                ])
-                assert len(tool_names) == len(expected), \
-                    f"Tool count mismatch: got {len(tool_names)}, expected {len(expected)}. Extra: {set(tool_names) - set(expected)}, Missing: {set(expected) - set(tool_names)}"
-                for name in expected:
-                    assert name in tool_names, f"Missing tool: {name}"
-
-    async def test_tools_have_input_schemas(self):
-        async with stdio_client(get_server_params()) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-                for tool in result.tools:
-                    assert tool.inputSchema is not None, f"{tool.name} missing inputSchema"
-                    assert tool.inputSchema.get("type") == "object", \
-                        f"{tool.name} schema type should be 'object'"
-
-
-# ---------------------------------------------------------------------------
-# Connection
 # ---------------------------------------------------------------------------
 
 class TestConnection:
@@ -168,10 +121,16 @@ class TestLabels:
                 assert "error" not in create_text.lower(), \
                     f"Create label failed: {create_text}"
 
-                # Find href of created label
-                labels_result = await session.call_tool("get-labels", {})
+                # Find href of created label.
+                # Deliberately filtered: an unfiltered get-labels is capped at
+                # one page (500 on this PCE), so on an org with more labels than
+                # that, a freshly created one is simply not in the response.
+                labels_result = await session.call_tool("get-labels", {
+                    "key": self.LABEL_KEY, "value": self.LABEL_VALUE
+                })
                 href = self._find_label_href(labels_result.content[0].text, self.LABEL_VALUE)
-                assert href, "Could not find created label"
+                assert href, \
+                    f"Could not find created label: {labels_result.content[0].text[:300]}"
 
                 # Update (changes value to _updated)
                 update_result = await session.call_tool("update-label", {
@@ -200,9 +159,18 @@ class TestWorkloads:
     WORKLOAD_NAME = "__mcp_test_workload__"
 
     async def test_get_workloads(self):
-        result = await run_tool("get-workloads", {})
-        text = result.content[0].text
-        assert "Workloads:" in text
+        """get-workloads returns a JSON envelope, not a 'Workloads:' prefix.
+
+        The prefix went away when get-workloads became dual-mode with
+        MCP-aware response sizing; this asserts the envelope contract that
+        replaced it.
+        """
+        data = parse_result(await run_tool("get-workloads", {}))
+        assert isinstance(data, dict), f"expected a JSON envelope, got: {data!r:.200}"
+        assert_no_error(data, "get-workloads")
+        for key in ("total", "returned", "truncated", "columns"):
+            assert key in data, f"envelope missing {key!r}: {sorted(data)}"
+        assert data["returned"] <= data["total"]
 
     async def test_get_workloads_with_name_filter(self):
         result = await run_tool("get-workloads", {"name": "nonexistent_xyz_12345"})

@@ -1,9 +1,30 @@
+---
+title: Security review (2026-05-13)
+layout: default
+parent: Security
+---
+
 # Security Review: illumio-mcp-server v0.2.0
 
 **Scope:** External-facing HTTP + auth + crypto + persistence surfaces (transport/*, auth/*, server.py dispatcher, tools/credentials.py).
 **Date:** 2026-05-13
 **Reviewer:** Adversarial code inspection (static analysis; no runtime fuzzing; no dependency scan via pip-audit)
 **Branch reviewed:** `feature/cloud-platform-api` (commits up to e29f668)
+
+> **Remediation status (updated 2026-08-26).** This is a point-in-time snapshot;
+> the findings below are recorded as they were assessed on 2026-05-13 and are not
+> edited retroactively. Several have since been fixed:
+>
+> | Finding | Status |
+> |---|---|
+> | High (1) — tool arguments logged at DEBUG in plaintext | **Fixed.** Dispatcher scrubbing added in `bbc8441`; extended to every tool handler and made recursive in `24660e3` (`src/illumio_mcp/log_scrub.py`). Default log level is now `INFO` (`MCP_LOG_LEVEL`). Note the original text overstates the exposure: `tools/credentials.py` never logged its arguments, so PCE API keys were not in fact reaching the log — the real leak was `_meta.confirm_token` from the two `requires_confirm` handlers. |
+> | High (2) — stored XSS in `/setup` | **Fixed** (see `tests/test_http_per_user.py` XSS regression test). |
+> | Medium — no body-size limits | **Fixed** by the `mcp` 1.29.1 upgrade in `24660e3`; `RequestBodyLimitMiddleware` caps bodies at 4 MiB. |
+> | Low — broken `auth_time`/fresh-auth feature | **Fixed** in `22f3a41`; `AuthenticatedUser.auth_time` is now populated from the OIDC claim. |
+>
+> Not yet addressed: request-rate limits, `Cache-Control: no-store` on
+> `/setup`/`/confirm`, `X-Request-Id` sanitization, `used_jti` growth
+> (`purge_expired` still uncalled), and the remaining Low/Informational items.
 
 ---
 

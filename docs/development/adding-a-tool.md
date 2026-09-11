@@ -1,3 +1,9 @@
+---
+title: Adding a tool
+layout: default
+parent: Development
+---
+
 # Adding a New Tool
 
 Five steps to add a new MCP tool. Each step is mechanical. The worked example below adds a hypothetical `get-services-by-port` tool.

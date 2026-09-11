@@ -91,11 +91,13 @@ async def test_initialize_and_list_tools_over_http(http_server_url):
             # Sanity: a handful of well-known tools from the registry
             for expected in ("get-labels", "get-workloads", "check-pce-connection", "provision-policy"):
                 assert expected in tool_names, f"Missing {expected!r} in HTTP-transport tool list"
-            # Same count as stdio (matches test_tool_metadata.py's expectation)
-            assert len(tool_names) == 46
+            # Derived, not hardcoded: a literal count is another place to forget
+            # when a tool is added (see tests/test_mcp_protocol.py).
+            from illumio_mcp.tools import TOOL_REGISTRY
+            assert set(tool_names) == set(TOOL_REGISTRY)
 
 
-async def test_check_pce_connection_over_http(http_server_url):
+async def test_check_pce_connection_over_http(http_server_url, requires_pce):
     """A real tool call round-trips through HTTP. Uses check-pce-connection
     because it's fast and proves the PCE handshake reaches Illumio via the
     same ToolContext path that stdio uses."""
@@ -108,7 +110,7 @@ async def test_check_pce_connection_over_http(http_server_url):
                 f"check-pce-connection returned unexpected text: {text!r}"
 
 
-async def test_get_labels_over_http(http_server_url):
+async def test_get_labels_over_http(http_server_url, requires_pce):
     """Non-trivial tool call returns a non-empty body."""
     async with streamablehttp_client(f"{http_server_url}/mcp") as (read, write, _get_session_id):
         async with ClientSession(read, write) as session:
@@ -116,3 +118,29 @@ async def test_get_labels_over_http(http_server_url):
             result = await session.call_tool("get-labels", {})
             text = result.content[0].text
             assert "Labels:" in text, f"get-labels output missing 'Labels:' prefix: {text[:200]!r}"
+
+
+async def test_list_tools_works_without_any_pce_configuration(http_server_url, monkeypatch):
+    """tools/list must not require a PCE.
+
+    Regression: in dev-insecure mode the per-request context builder called
+    get_pce_from_env() unconditionally, so with no PCE_* env vars
+    PolicyComputeEngine(None) raised straight out of the ASGI handler and the
+    MCP endpoint answered 500 -- for a request that needs no PCE at all.
+
+    Only CI caught this: a local .env always supplies a host string, which
+    constructs fine and fails later at request time.
+    """
+    from illumio_mcp import pce as pce_mod
+
+    for var in ("PCE_HOST", "PCE_PORT", "PCE_ORG_ID", "API_KEY", "API_SECRET"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(pce_mod, "_stdio_singleton", None)  # defeat memoisation
+
+    async with streamablehttp_client(f"{http_server_url}/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+
+    from illumio_mcp.tools import TOOL_REGISTRY
+    assert {t.name for t in tools.tools} == set(TOOL_REGISTRY)

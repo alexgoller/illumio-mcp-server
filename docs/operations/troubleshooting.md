@@ -1,3 +1,9 @@
+---
+title: Troubleshooting
+layout: default
+parent: Operations
+---
+
 # Troubleshooting
 
 Common errors, what they mean, and how to fix them.

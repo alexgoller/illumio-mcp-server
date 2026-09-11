@@ -1,3 +1,10 @@
+---
+title: Keycloak
+layout: default
+parent: OAuth providers
+grand_parent: Operations
+---
+
 # Keycloak — OAuth Setup
 
 This is a briefer guide for self-hosted Keycloak. Verify steps with your Keycloak admin — versions vary.
