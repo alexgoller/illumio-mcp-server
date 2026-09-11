@@ -4,6 +4,14 @@ layout: default
 parent: Development
 ---
 
+{: .note }
+> **CI.** `.github/workflows/ci.yml` runs the suite on Python 3.12 and 3.13 for every
+> push to `main` and every pull request. CI has no PCE, so PCE-dependent tests skip via
+> the `requires_pce` fixture while the rest run — roughly 172 tests. The job fails if
+> fewer than 150 pass, so a regression in the PCE gating cannot turn the suite into a
+> silently empty green run. Two further jobs check that `docs/tools.md` still matches the
+> tool registry and that no dependency carries a known OSV advisory.
+
 # Testing
 
 Three tiers of tests. Most work without a real PCE.
