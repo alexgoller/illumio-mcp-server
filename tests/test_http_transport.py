@@ -118,3 +118,29 @@ async def test_get_labels_over_http(http_server_url, requires_pce):
             result = await session.call_tool("get-labels", {})
             text = result.content[0].text
             assert "Labels:" in text, f"get-labels output missing 'Labels:' prefix: {text[:200]!r}"
+
+
+async def test_list_tools_works_without_any_pce_configuration(http_server_url, monkeypatch):
+    """tools/list must not require a PCE.
+
+    Regression: in dev-insecure mode the per-request context builder called
+    get_pce_from_env() unconditionally, so with no PCE_* env vars
+    PolicyComputeEngine(None) raised straight out of the ASGI handler and the
+    MCP endpoint answered 500 -- for a request that needs no PCE at all.
+
+    Only CI caught this: a local .env always supplies a host string, which
+    constructs fine and fails later at request time.
+    """
+    from illumio_mcp import pce as pce_mod
+
+    for var in ("PCE_HOST", "PCE_PORT", "PCE_ORG_ID", "API_KEY", "API_SECRET"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(pce_mod, "_stdio_singleton", None)  # defeat memoisation
+
+    async with streamablehttp_client(f"{http_server_url}/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+
+    from illumio_mcp.tools import TOOL_REGISTRY
+    assert {t.name for t in tools.tools} == set(TOOL_REGISTRY)

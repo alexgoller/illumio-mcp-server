@@ -131,6 +131,24 @@ def reset_http_context(token: contextvars.Token) -> None:
     _http_context.reset(token)
 
 
+def _env_pce_or_none(context: str):
+    """Env-configured PCE client, or None if one cannot be built.
+
+    Returning None rather than raising is deliberate. Protocol-level requests
+    such as tools/list need no PCE at all, and a server with no PCE configured
+    must not answer them with a 500. When a tool genuinely needs a PCE, the
+    dispatcher's own gate turns `pce=None` into a clean `no_credentials` tool
+    error -- the same treatment the per_user branch already gives a failed
+    keystore lookup.
+    """
+    try:
+        return get_pce_from_env()
+    except Exception:
+        logger.warning("No usable PCE configuration (%s); "
+                       "PCE-backed tools will report no_credentials", context)
+        return None
+
+
 def build_http_context_for(
     user_sub: str | None,
     user_iss: str | None,
@@ -151,7 +169,7 @@ def build_http_context_for(
     if pce_mode == "shared":
         # Shared service-account mode: every authenticated user uses the same
         # env-loaded PCE. SSO + role + audit + confirm still enforced.
-        pce = get_pce_from_env()
+        pce = _env_pce_or_none("shared mode")
     else:
         # per_user mode (Phase 3b)
         pce = None
@@ -165,7 +183,7 @@ def build_http_context_for(
                 logger.exception("Failed to load PCE credentials for user %s", user_sub)
         elif keystore is None:
             # Dev-insecure mode: no keystore, fall back to env-loaded PCE
-            pce = get_pce_from_env()
+            pce = _env_pce_or_none("dev-insecure mode")
     return ToolContext(
         pce=pce,
         is_stdio=False,
