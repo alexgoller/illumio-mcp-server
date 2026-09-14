@@ -51,6 +51,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -58,9 +59,36 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ignore-error: the GitHub Actions cache backend intermittently fails
+          # the export with "error writing layer blob: not_found". That happens
+          # AFTER the image has been built and pushed, so without this the job
+          # goes red while a perfectly good image sits in the registry -- which
+          # is exactly how a shipped fix looked un-shipped on cb96096.
+          cache-to: type=gha,mode=max,ignore-error=true
           platforms: linux/amd64,linux/arm64
           provenance: false
+
+      # Print what was actually published. Comparing this digest against
+      # `docker image inspect --format '{{index .RepoDigests 0}}'` on the host
+      # is the fastest way to tell a stale container from a stale build.
+      - name: Report published digest
+        run: |
+          {
+            echo "### Image published"
+            echo
+            echo '```'
+            echo "digest: ${{ steps.build.outputs.digest }}"
+            echo "tags:"
+            echo "${{ steps.meta.outputs.tags }}" | sed 's/^/  /'
+            echo '```'
+            echo
+            echo "Verify on the host:"
+            echo '```bash'
+            echo "docker pull ghcr.io/${{ github.repository }}:latest"
+            echo "docker image inspect ghcr.io/${{ github.repository }}:latest \\"
+            echo "  --format '{{index .RepoDigests 0}}'"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update release with image details
         uses: softprops/action-gh-release@v1
