@@ -315,7 +315,29 @@ def raw_flows_to_dataframe(pce, raw_flows: list) -> pd.DataFrame:
                 'policy_decision': flow.get('policy_decision'),
                 'flow_direction': flow.get('flow_direction'),
                 'num_connections': flow.get('num_connections') or 0,
+                'bytes_in': flow.get('dst_bi'),
+                'bytes_out': flow.get('dst_bo'),
+                'state': flow.get('state'),
             }
+
+            # Timestamps. The Explorer payload nests these under
+            # timestamp_range; FQS uses flat start_time/end_time. Restored
+            # after the switch to raw parsing dropped them -- "when did this
+            # happen" is unanswerable without them.
+            window = flow.get('timestamp_range') or {}
+            row['first_detected'] = window.get('first_detected') or flow.get('start_time')
+            row['last_detected'] = window.get('last_detected') or flow.get('end_time')
+
+            # Which rule allowed it, and what draft policy would decide.
+            # Absent from the Explorer API (verified 0/50 on a live PCE) but
+            # present in FQS, so collect defensively rather than assume.
+            row['draft_policy_decision'] = flow.get('draft_policy_decision')
+            rules = flow.get('rules') or []
+            if isinstance(rules, list) and rules:
+                hrefs = [r.get('href') for r in rules if isinstance(r, dict) and r.get('href')]
+                row['matched_rules'] = ', '.join(hrefs) if hrefs else None
+            else:
+                row['matched_rules'] = None
             node(flow.get('src') or {}, 'src', row)
             node(flow.get('dst') or {}, 'dst', row)
             rows.append(row)
@@ -328,6 +350,91 @@ def raw_flows_to_dataframe(pce, raw_flows: list) -> pd.DataFrame:
                        skipped, len(raw_flows))
     return pd.DataFrame(rows)
 
+
+
+# ---------------------------------------------------------------------------
+# Grouping dimensions
+# ---------------------------------------------------------------------------
+
+# Named dimensions a caller can group by, mapped to the columns that implement
+# them. Names are stable and human-meaningful; the columns behind them are an
+# implementation detail that can change without breaking the tool contract.
+GROUP_DIMENSIONS = {
+    "process":     ["process_name"],
+    "service_name": ["windows_service_name"],
+    "user":        ["user_name"],
+    "source":      ["src_ip", "src_hostname"],
+    "source_app":  ["src_app", "src_env"],
+    "destination": ["dst_ip", "dst_hostname", "dst_fqdn"],
+    "dest_app":    ["dst_app", "dst_env"],
+    "fqdn":        ["dst_fqdn"],
+    "ip_list":     ["src_ip_lists", "dst_ip_lists"],
+    "port":        ["port"],
+    "proto":       ["proto"],
+    "policy":      ["policy_decision"],
+    "rule":        ["matched_rules"],
+    "direction":   ["flow_direction"],
+}
+
+DEFAULT_GROUP_BY = ["source", "destination", "port", "proto", "policy",
+                    "process", "service_name", "user", "ip_list"]
+
+# Numeric columns that are summed rather than grouped.
+AGGREGATES = {"num_connections": "sum", "bytes_in": "sum", "bytes_out": "sum"}
+
+# Columns carried through grouping by range rather than sum. Without these the
+# window collapses and "when did this happen" becomes unanswerable -- the same
+# way process_name used to vanish: collected by the parser, dropped by the
+# groupby because it was neither a key nor an aggregate. ISO-8601 sorts
+# lexicographically, so min/max on the raw strings is correct.
+TIME_AGGREGATES = {"first_detected": "min", "last_detected": "max"}
+
+
+def resolve_group_by(df, group_by=None):
+    """Turn dimension names into concrete, present columns.
+
+    Returns (columns, unknown_dimensions). Unknown names are reported rather
+    than ignored: silently grouping by something other than what was asked for
+    produces a plausible-looking answer to a different question.
+    """
+    names = group_by or DEFAULT_GROUP_BY
+    if isinstance(names, str):
+        names = [names]
+    columns, unknown = [], []
+    for name in names:
+        key = str(name).strip().lower()
+        if key in GROUP_DIMENSIONS:
+            for col in GROUP_DIMENSIONS[key]:
+                if col in df.columns and col not in columns:
+                    columns.append(col)
+        elif key in df.columns:       # allow a raw column name as an escape hatch
+            if key not in columns:
+                columns.append(key)
+        else:
+            unknown.append(name)
+    return columns, unknown
+
+
+def group_flows(df, group_by=None):
+    """Group a flow frame by named dimensions, summing the numeric columns.
+
+    Fills NaN with the sentinel first: pandas drops any row with a NaN group
+    key, which is what silently deleted every outbound flow before.
+    """
+    columns, unknown = resolve_group_by(df, group_by)
+    if not columns:
+        return df, [], unknown
+    frame = df.copy()
+    for col in columns:
+        frame[col] = frame[col].fillna(NA)
+    aggs = {c: how for c, how in AGGREGATES.items() if c in frame.columns}
+    for col in aggs:
+        frame[col] = pd.to_numeric(frame[col], errors="coerce").fillna(0)
+    for col, how in TIME_AGGREGATES.items():
+        if col in frame.columns and col not in columns:
+            aggs[col] = how
+    grouped = frame.groupby(columns, dropna=False).agg(aggs).reset_index()
+    return grouped, columns, unknown
 
 def _endpoint_label(row, prefix: str) -> str:
     """Human-readable identity for one side of a flow.
@@ -638,20 +745,16 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
                                  "end_date": arguments['end_date']})
             )]
 
-        # Group by columns that exist. process_name / fqdn / user_name are part
-        # of the key, not dropped: they are the whole reason to call this tool.
-        group_cols = ['src_ip', 'dst_ip', 'proto', 'port', 'policy_decision',
-                      'process_name', 'windows_service_name', 'user_name',
-                      'src_fqdn', 'dst_fqdn',
-                      'src_ip_lists', 'dst_ip_lists', 'src_hostname', 'dst_hostname']
-        group_cols = [c for c in group_cols if c in df.columns]
-
-        # Fill NaN before grouping. pandas drops any row with a NaN in a group
-        # key, which silently discarded every flow whose destination had no
-        # workload -- 500 flows in, 0 rows out.
-        for col in group_cols:
-            df[col] = df[col].fillna(NA)
-        df = df.groupby(group_cols, dropna=False).agg({'num_connections': 'sum'}).reset_index()
+        # Group by named dimensions. Defaults keep process / fqdn / user in the
+        # key -- they are the whole reason to call this tool -- but a caller can
+        # collapse to just what they need, e.g. ["process", "fqdn"].
+        df, group_cols, unknown_dims = group_flows(df, arguments.get('group_by'))
+        if unknown_dims:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "unknown_group_by",
+                "unknown": unknown_dims,
+                "valid": sorted(GROUP_DIMENSIONS),
+            }))]
         if 'proto' in df.columns:
             df['proto'] = df['proto'].map(_proto)
 
@@ -872,3 +975,133 @@ def handle_find_unmanaged_traffic(ctx, arguments: dict) -> list:
         error_msg = f"Failed to find unmanaged traffic: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+
+def _is_external(row) -> bool:
+    """True when the destination is not a workload this PCE manages.
+
+    Egress is defined by the absence of a managed destination workload, not by
+    RFC1918 ranges: a flow to an unmanaged internal host is just as interesting
+    as one to the internet, and an IP-list name alone does not tell us which.
+    """
+    hostname = row.get('dst_hostname')
+    return hostname in (None, NA, '') or pd.isna(hostname)
+
+
+def handle_discover_process_egress(ctx, arguments: dict) -> list:
+    """Which processes talk to destinations outside the managed estate.
+
+    A focused answer to the shadow-IT question. get-traffic-flows can produce
+    the same data with group_by, but the curation is the value here: external
+    only, FQDN preferred over IP, ranked, and annotated with whether policy is
+    actually permitting it.
+    """
+    logger.debug("DISCOVER PROCESS EGRESS CALLED: %s", ScrubbedArgs(arguments))
+
+    lookback = int(arguments.get('lookback_days', 7))
+    arguments.setdefault('start_date',
+                         (datetime.now() - timedelta(days=lookback)).strftime('%Y-%m-%d'))
+    arguments.setdefault('end_date', datetime.now().strftime('%Y-%m-%d'))
+
+    try:
+        pce = ctx.pce
+        unresolved = _resolve_label_filters(pce, arguments)
+        problem = _unresolved_error(unresolved, pce)
+        if problem:
+            return [types.TextContent(type="text", text=json.dumps(problem))]
+
+        max_results = min(int(arguments.get('max_results', MCP_BUG_MAX_RESULTS)),
+                          MCP_BUG_MAX_RESULTS)
+        query = TrafficQuery.build(
+            start_date=arguments['start_date'],
+            end_date=arguments['end_date'],
+            include_sources=_normalise_filter(arguments.get('include_sources')),
+            exclude_sources=arguments.get('exclude_sources', []),
+            include_destinations=_normalise_filter(arguments.get('include_destinations')),
+            exclude_destinations=arguments.get('exclude_destinations', []),
+            include_services=arguments.get('include_services', []),
+            exclude_services=arguments.get('exclude_services', []),
+            policy_decisions=arguments.get('policy_decisions', []),
+            exclude_workloads_from_ip_list_query=False,   # egress lives in IP lists
+            max_results=max_results,
+            query_name=arguments.get('query_name', 'mcp-process-egress'),
+        )
+        raw = fetch_flows_raw(pce, query, arguments.get('query_name', 'mcp-process-egress'))
+        df = raw_flows_to_dataframe(pce, raw)
+        if df.empty:
+            return [types.TextContent(type="text", text=json.dumps({
+                "message": "No traffic flows found in the specified window",
+                "window": {"start": arguments['start_date'], "end": arguments['end_date']},
+                "pce_flows": len(raw),
+            }))]
+
+        external = df[df.apply(_is_external, axis=1)]
+        wanted = arguments.get('process')
+        if wanted:
+            needles = [wanted] if isinstance(wanted, str) else list(wanted)
+            mask = external['process_name'].fillna('').str.lower().apply(
+                lambda name: any(n.lower() in name for n in needles if n))
+            external = external[mask]
+
+        if arguments.get('only_named_processes', True):
+            external = external[external['process_name'].notna()
+                                & (external['process_name'] != '')]
+
+        if external.empty:
+            return [types.TextContent(type="text", text=json.dumps({
+                "message": "No egress flows matched",
+                "window": {"start": arguments['start_date'], "end": arguments['end_date']},
+                "pce_flows": len(raw),
+                "hint": ("The PCE only reports process names for flows seen by a VEN with "
+                         "process visibility enabled. Set only_named_processes=false to "
+                         "include flows with no process attribution."),
+            }))]
+
+        grouped, _, _ = group_flows(external, ["process", "user", "destination",
+                                               "port", "proto", "policy", "rule"])
+        grouped = grouped.sort_values('num_connections', ascending=False)
+
+        limit = int(arguments.get('limit', 50))
+        findings, by_process = [], {}
+        for row in grouped.head(limit).to_dict('records'):
+            target = _endpoint_label(row, 'dst')
+            allowed = row.get('policy_decision') == 'allowed'
+            finding = {
+                "process": row.get('process_name'),
+                "user": row.get('user_name') if row.get('user_name') != NA else None,
+                "destination": target,
+                "resolved_by_name": bool(row.get('dst_fqdn') not in (None, NA, '')),
+                "port": _int(row.get('port')),
+                "proto": _proto(row.get('proto')),
+                "policy_decision": row.get('policy_decision'),
+                "permitted_today": allowed,
+                "connections": int(row.get('num_connections') or 0),
+            }
+            if row.get('matched_rules') not in (None, NA, ''):
+                finding["matched_rule"] = row['matched_rules']
+            findings.append(finding)
+            by_process.setdefault(finding["process"], set()).add(target)
+
+        return [types.TextContent(type="text", text=json.dumps({
+            "window": {"start": arguments['start_date'], "end": arguments['end_date']},
+            "totals": {
+                "pce_flows": len(raw),
+                "egress_rows": int(len(external)),
+                "distinct_processes": len(by_process),
+                "returned": len(findings),
+                "truncated": len(grouped) > limit,
+            },
+            "processes": [
+                {"process": name, "external_destinations": sorted(dests)[:20]}
+                for name, dests in sorted(by_process.items(),
+                                          key=lambda kv: -len(kv[1]))
+            ],
+            "findings": findings,
+            "note": ("Egress means the destination is not a workload managed by this PCE. "
+                     "permitted_today reflects current policy, so a true value on an "
+                     "unexpected destination is the interesting case."),
+        }, default=str))]
+    except Exception as e:
+        error_msg = f"Failed in PCE operation: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]

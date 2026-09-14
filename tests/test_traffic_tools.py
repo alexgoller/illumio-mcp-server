@@ -171,3 +171,77 @@ def test_already_nested_filter_is_left_alone():
 def test_empty_dataframe_summarises_without_crashing():
     summary = summarize_traffic_structured(pd.DataFrame())
     assert summary["totals"]["rows"] == 0
+
+
+# ---------------------------------------------------------------------------
+# group_by dimensions and process-egress discovery
+# ---------------------------------------------------------------------------
+
+from illumio_mcp.tools.traffic import (          # noqa: E402
+    GROUP_DIMENSIONS,
+    TIME_AGGREGATES,
+    group_flows,
+    resolve_group_by,
+    _is_external,
+)
+
+
+def _frame(*flows):
+    return raw_flows_to_dataframe(FakePCE(LABELS), list(flows))
+
+
+def test_group_by_collapses_to_the_requested_dimensions():
+    df = _frame(_flow(dst={"ip": "1.1.1.1", "fqdn": "a.example"}),
+                _flow(dst={"ip": "2.2.2.2", "fqdn": "a.example"}))
+    grouped, cols, unknown = group_flows(df, ["process", "fqdn"])
+    assert unknown == []
+    assert "process_name" in cols and "dst_fqdn" in cols
+    assert "dst_ip" not in cols           # collapsed away
+    assert len(grouped) == 1              # both rows share process + fqdn
+    assert grouped.iloc[0]["num_connections"] == 10
+
+
+def test_unknown_dimension_is_reported_not_ignored():
+    """Silently grouping by something else answers a different question."""
+    _, _, unknown = group_flows(_frame(_flow()), ["proces"])
+    assert unknown == ["proces"]
+
+
+def test_raw_column_name_works_as_an_escape_hatch():
+    _, cols, unknown = group_flows(_frame(_flow()), ["policy_decision"])
+    assert unknown == [] and "policy_decision" in cols
+
+
+def test_timestamps_survive_grouping():
+    """Regression: first/last_detected were collected by the parser and then
+    dropped by the groupby -- neither a key nor an aggregate. Exactly how
+    process_name used to vanish."""
+    a = _flow(timestamp_range={"first_detected": "2026-01-01T00:00:00Z",
+                               "last_detected": "2026-01-02T00:00:00Z"})
+    b = _flow(timestamp_range={"first_detected": "2026-01-03T00:00:00Z",
+                               "last_detected": "2026-01-04T00:00:00Z"})
+    grouped, _, _ = group_flows(_frame(a, b), ["process"])
+    assert set(TIME_AGGREGATES) <= set(grouped.columns)
+    assert grouped.iloc[0]["first_detected"] == "2026-01-01T00:00:00Z"   # min
+    assert grouped.iloc[0]["last_detected"] == "2026-01-04T00:00:00Z"    # max
+
+
+def test_every_declared_dimension_is_usable():
+    df = _frame(_flow(dst={"ip": "1.1.1.1", "fqdn": "a.example"}))
+    for name in GROUP_DIMENSIONS:
+        _, _, unknown = group_flows(df, [name])
+        assert unknown == [], f"{name} declared but unusable"
+
+
+def test_external_is_absence_of_a_managed_destination():
+    """Egress is defined by no managed destination workload, not by RFC1918."""
+    assert _is_external({"dst_hostname": None})
+    assert _is_external({"dst_hostname": NA})
+    assert not _is_external({"dst_hostname": "db01"})
+
+
+def test_bytes_are_summed_when_present():
+    df = _frame(_flow(dst_bi=100, dst_bo=50), _flow(dst_bi=1, dst_bo=2))
+    grouped, _, _ = group_flows(df, ["process"])
+    assert grouped.iloc[0]["bytes_in"] == 101
+    assert grouped.iloc[0]["bytes_out"] == 52
