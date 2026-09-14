@@ -142,6 +142,20 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
                         append_label = pce.labels.get_by_reference(label["href"])
                         logger.debug(f"Appending label: {append_label}")
                         label_set.labels.append(append_label)
+                    elif isinstance(label, dict) and "key" in label and "value" in label:
+                        # {"key": "app", "value": "vdi"} -- the form the schema's
+                        # "array of label values" invites. This previously fell
+                        # through to the catch-all, was skipped with only a log
+                        # line, and produced an EMPTY scope: the ruleset was
+                        # created unscoped and nothing told the caller.
+                        key, value = label["key"], label["value"]
+                        href = value_href_map.get(f"{key}={value}")
+                        if not href:
+                            return [types.TextContent(type="text", text=json.dumps({
+                                "error": "label_not_found",
+                                "message": f"No label {key}={value} exists in the PCE",
+                            }))]
+                        label_set.labels.append(pce.labels.get_by_reference(href))
                     elif isinstance(label, str):
                         # Handle string references (either href or label value)
                         if label in value_href_map:
@@ -153,8 +167,15 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
                         logger.debug(f"Appending label: {append_label}")
                         label_set.labels.append(append_label)
                     else:
-                        logger.warning(f"Unexpected label format: {label}")
-                        continue
+                        # Never skip silently: a dropped scope label creates the
+                        # ruleset WIDER than asked for, which is the dangerous
+                        # direction for a policy object.
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "error": "invalid_scope_label",
+                            "message": ("Scope labels must be {'key':..., 'value':...}, "
+                                        "{'href':...}, 'key=value', or a label HREF"),
+                            "received": repr(label),
+                        }))]
 
                 label_sets.append(label_set)
                 logger.debug(f"Label set: {label_set}")
@@ -382,6 +403,20 @@ def handle_update_ruleset(ctx, arguments: dict) -> list:
                         append_label = pce.labels.get_by_reference(label["href"])
                         logger.debug(f"Appending label: {append_label}")
                         label_set.labels.append(append_label)
+                    elif isinstance(label, dict) and "key" in label and "value" in label:
+                        # {"key": "app", "value": "vdi"} -- the form the schema's
+                        # "array of label values" invites. This previously fell
+                        # through to the catch-all, was skipped with only a log
+                        # line, and produced an EMPTY scope: the ruleset was
+                        # created unscoped and nothing told the caller.
+                        key, value = label["key"], label["value"]
+                        href = value_href_map.get(f"{key}={value}")
+                        if not href:
+                            return [types.TextContent(type="text", text=json.dumps({
+                                "error": "label_not_found",
+                                "message": f"No label {key}={value} exists in the PCE",
+                            }))]
+                        label_set.labels.append(pce.labels.get_by_reference(href))
                     elif isinstance(label, str):
                         # Handle string references (either href or label value)
                         if "=" in label:  # key=value format
