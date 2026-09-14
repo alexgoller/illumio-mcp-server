@@ -13,6 +13,21 @@ from ..log_scrub import ScrubbedArgs
 logger = logging.getLogger('illumio_mcp')
 
 
+def _label_filter(hrefs) -> str:
+    """Encode label HREFs for the PCE's `labels` query parameter.
+
+    The API expects a list of AND-groups, each group a list of OR-alternatives:
+    [["<app href>"], ["<env href>"]] means "has this app AND has this env".
+
+    Passing a flat ["<app>", "<env>"] makes the PCE reject the request with
+    406 invalid_uri, and the href appears brace-wrapped in the error, which
+    reads like a Python set and sends you looking in the wrong place. Verified
+    against a live PCE: flat -> 406, [[a, b]] -> 0 workloads, [[a], [b]] -> 33.
+    """
+    return json.dumps([[href] for href in hrefs])
+
+
+
 def handle_compliance_check(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("COMPLIANCE CHECK CALLED")
@@ -128,7 +143,7 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
             if env_labels:
                 filter_labels.append(env_labels[0].href)
         if filter_labels:
-            params["labels"] = json.dumps(filter_labels)
+            params["labels"] = _label_filter(filter_labels)
 
         workloads = pce.workloads.get(params=params)
 
@@ -356,7 +371,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
 
         # Get workloads for this app+env
         workloads = pce.workloads.get(params={
-            "labels": json.dumps([app_label.href, env_label.href]),
+            "labels": _label_filter([app_label.href, env_label.href]),
             "max_results": 10000,
             "include": "labels"
         })
@@ -379,7 +394,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
             start_date=start_date,
             end_date=end_date,
             include_sources=[[]],
-            include_destinations=[[app_filter, env_filter]],
+            include_destinations=[[app_filter], [env_filter]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,
             query_name='readiness-inbound'
@@ -390,7 +405,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
         traffic_query_out = TrafficQuery.build(
             start_date=start_date,
             end_date=end_date,
-            include_sources=[[app_filter, env_filter]],
+            include_sources=[[app_filter], [env_filter]],
             include_destinations=[[]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,
@@ -550,7 +565,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
             start_date=start_date,
             end_date=end_date,
             include_sources=[[]],
-            include_destinations=[[app_filter, env_filter]],
+            include_destinations=[[app_filter], [env_filter]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,
             query_name='coverage-inbound'
@@ -561,7 +576,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
         traffic_query_out = TrafficQuery.build(
             start_date=start_date,
             end_date=end_date,
-            include_sources=[[app_filter, env_filter]],
+            include_sources=[[app_filter], [env_filter]],
             include_destinations=[[]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,
@@ -753,7 +768,7 @@ def handle_get_workload_enforcement_status(ctx, arguments: dict) -> list:
             if env_labels:
                 filter_labels.append(env_labels[0].href)
         if filter_labels:
-            params["labels"] = json.dumps(filter_labels)
+            params["labels"] = _label_filter(filter_labels)
 
         workloads = pce.workloads.get(params=params)
 
