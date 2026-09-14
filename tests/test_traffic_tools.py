@@ -133,48 +133,10 @@ def test_blocked_traffic_is_called_out():
 
 # --- finding 1: label shorthand -------------------------------------------
 
-def test_label_shorthand_resolves_to_href():
-    """Resolves to a bare HREF string.
-
-    This test previously asserted a {"label": {"href": ...}} dict, which is what
-    the code produced and what the SDK silently refuses to coerce. The test
-    passed while the feature was broken -- it encoded my assumption about the
-    SDK rather than the SDK's actual contract.
-    """
-    lookup = {"app=vdi": "/orgs/1/labels/1"}
-    unresolved = []
-    assert _resolve_filter_block(["app=vdi"], lookup, unresolved) == ["/orgs/1/labels/1"]
-    assert unresolved == []
-
-
 def test_unknown_label_is_reported_not_silently_forwarded():
     unresolved = []
     _resolve_filter_block(["app=nope"], {"app=vdi": "/x"}, unresolved)
     assert unresolved == ["app=nope"]
-
-
-@pytest.mark.parametrize("value", ["/orgs/1/labels/1", "10.0.0.1", "api.anthropic.com"])
-def test_non_label_filters_pass_through_untouched(value):
-    assert _resolve_filter_block([value], {}, []) == [value]
-
-
-# --- finding 4: unfiltered query ------------------------------------------
-
-def test_empty_filter_becomes_match_all():
-    """Explorer wants [[]] for "anything"; [] produces an invalid query."""
-    assert _normalise_filter(None) == [[]]
-    assert _normalise_filter([]) == [[]]
-
-
-def test_flat_filter_list_is_left_flat_for_the_sdk():
-    """Previously asserted [["app=vdi"]]. Wrapping is the SDK's job, and doing
-    it ourselves is exactly what made TrafficQuery.build reject the filter."""
-    assert _normalise_filter(["app=vdi"]) == ["app=vdi"]
-
-
-def test_already_nested_filter_is_flattened():
-    """Legacy callers pass [[...]]; flatten it so the SDK can coerce the string."""
-    assert _normalise_filter([["app=vdi"]]) == ["app=vdi"]
 
 
 def test_empty_dataframe_summarises_without_crashing():
@@ -267,46 +229,6 @@ HREF = "/orgs/1/labels/74"
 ENV_HREF = "/orgs/1/labels/126"
 
 
-def test_label_shorthand_becomes_a_bare_href_string():
-    """Not a {'label': {'href': ...}} dict: the SDK skips coercion on non-str."""
-    unresolved = []
-    assert _resolve_filter_block(["app=vdi"], {"app=vdi": HREF}, unresolved) == [HREF]
-    assert unresolved == []
-
-
-def test_bare_href_passes_through_as_a_string():
-    """Regression: a raw HREF used to reach TrafficQuery.build nested one level
-    deep, raising AttributeError('Invalid value for include')."""
-    assert _normalise_filter([HREF]) == [HREF]
-
-
-def test_nested_filter_is_flattened_for_the_sdk():
-    """Callers (and our own older code) pass [[href]]; flatten rather than reject."""
-    assert _normalise_filter([[HREF]]) == [HREF]
-
-
-def test_two_labels_stay_flat_so_the_sdk_ands_them():
-    """['app','env'] becomes [[app],[env]] inside the SDK -- an AND. Verified
-    on a live PCE: this returns flows, [[app, env]] returns none."""
-    assert _normalise_filter([HREF, ENV_HREF]) == [HREF, ENV_HREF]
-
-
-def test_empty_filter_is_the_one_case_we_wrap():
-    """[] yields no flows at all; [[]] means match anything."""
-    assert _normalise_filter(None) == [[]]
-    assert _normalise_filter([]) == [[]]
-
-
-def test_a_single_string_is_accepted():
-    assert _normalise_filter(HREF) == [HREF]
-
-
-# ---------------------------------------------------------------------------
-# Which host runs the process. process_name comes from whichever VEN reported
-# the flow, so direction decides the side. Verified on a live PCE:
-# chrome.exe/mstsc.exe/putty.exe are outbound, httpd/sshd are inbound.
-# ---------------------------------------------------------------------------
-
 def test_inbound_process_is_attributed_to_the_destination():
     """httpd reported on an inbound flow runs on the web server, not on the
     endpoint that connected to it. Getting this backwards puts a server daemon
@@ -364,60 +286,6 @@ def _build(sources=None, destinations=None):
     )
 
 
-def test_sdk_accepts_a_resolved_label_shorthand():
-    """app=vdi -> href -> TrafficQuery.build must not raise.
-
-    The old code produced {"label": {"href": ...}}; the SDK passes non-str
-    through uncoerced and then rejects it with
-    AttributeError: Invalid value for include.
-    """
-    resolved = _resolve_filter_block(["app=vdi"], {"app=vdi": LABEL_HREF}, [])
-    query = _build(sources=resolved)
-    assert query.sources.include == [[{"label": {"href": LABEL_HREF}}]]
-
-
-def test_sdk_accepts_a_bare_href():
-    assert _build(sources=[LABEL_HREF]).sources.include == [[{"label": {"href": LABEL_HREF}}]]
-
-
-def test_sdk_accepts_a_legacy_nested_href():
-    assert _build(sources=[[LABEL_HREF]]).sources.include == [[{"label": {"href": LABEL_HREF}}]]
-
-
-def test_two_labels_become_two_and_blocks_in_the_sdk():
-    """Two AND-blocks, not one block with two labels. On a live PCE the former
-    returns flows and the latter returns none."""
-    assert _build(sources=[LABEL_HREF, ENV_LABEL_HREF]).sources.include == [
-        [{"label": {"href": LABEL_HREF}}],
-        [{"label": {"href": ENV_LABEL_HREF}}],
-    ]
-
-
-def test_sdk_accepts_an_omitted_filter_as_match_all():
-    assert _build(sources=None).sources.include == [[]]
-
-
-def test_sdk_accepts_an_ip_address():
-    assert _build(sources=["10.0.0.1"]).sources.include == [[{"ip_address": "10.0.0.1"}]]
-
-
-def test_pre_wrapped_dict_is_what_the_sdk_rejects():
-    """Pins the failure mode itself, so nobody reintroduces the dict form
-    thinking it is equivalent."""
-    with _pytest.raises(Exception):
-        TrafficQuery.build(
-            start_date="2026-01-01", end_date="2026-01-02",
-            include_sources=[[LABEL_HREF]],          # nested raw string
-            include_destinations=[[]], exclude_sources=[], exclude_destinations=[],
-            include_services=[], exclude_services=[], policy_decisions=[],
-            max_results=10, query_name="must-raise",
-        )
-
-
-# ---------------------------------------------------------------------------
-# discover-process-egress: only source-side processes, and never a bare zero
-# ---------------------------------------------------------------------------
-
 def test_egress_ignores_inbound_flows():
     """An inbound flow names the listener on the destination. Counting it as
     egress puts a web server's httpd on the endpoint that called it."""
@@ -462,10 +330,156 @@ def test_ringfence_grouping_keeps_unlabelled_sources():
     assert grouped["num_connections"].sum() == 12
 
 
-def test_ringfence_does_not_combine_app_and_env_into_one_block():
-    """[[app, env]] returns no flows on a live PCE; [[app], [env]] returns 278.
-    A source guard, because the difference only shows against a real PCE."""
+# ---------------------------------------------------------------------------
+# Filter shaping.
+#
+# Explorer takes a list of AND-blocks: conditions inside ONE block are ANDed,
+# separate blocks are ORed. Measured on a live PCE (demo100) with
+# app=ordering + env=Production:
+#
+#     [[app, env]]    -> 233 flows, every one ordering/Production   (AND)
+#     [[app], [env]]  -> 500 flows, mixed apps and envs             (OR)
+#
+# and on the workloads API, where 23 hosts genuinely carry both labels:
+#
+#     [[a, b]]   ->  23 workloads   (AND, matches ground truth)
+#     [[a], [b]] -> 138 workloads   (OR: 32 + 129 - 23)
+#
+# An earlier version of these tests asserted the OR form and passed, because
+# the only PCE they ran against had no host carrying both labels -- so the AND
+# returned 0 and looked like the bug. Numbers are recorded here deliberately.
+# ---------------------------------------------------------------------------
+
+APP_HREF = "/orgs/1/labels/48"
+ENV_HREF = "/orgs/1/labels/126"
+
+
+def test_label_shorthand_resolves_to_a_filter_dict():
+    """app=vdi becomes {"label": {"href": ...}} -- a filter condition, not a
+    raw string. A raw string nested in a block makes the SDK skip coercion and
+    fail with "Invalid value for include"."""
+    unresolved = []
+    assert _resolve_filter_block(["app=vdi"], {"app=vdi": APP_HREF}, unresolved) == \
+        [{"label": {"href": APP_HREF}}]
+    assert unresolved == []
+
+
+def test_bare_label_href_is_also_converted():
+    """Regression: bare HREFs reached the SDK as raw strings because the
+    resolver short-circuited when no "=" was present anywhere in the filter."""
+    assert _resolve_filter_block([APP_HREF], {}, []) == [{"label": {"href": APP_HREF}}]
+
+
+def test_two_conditions_go_in_one_block_and_therefore_AND():
+    """["app=ordering", "env=Production"] means AND. Separate blocks would OR
+    them and silently widen the scope -- 500 mixed flows instead of 233."""
+    conditions = [{"label": {"href": APP_HREF}}, {"label": {"href": ENV_HREF}}]
+    assert _normalise_filter(conditions) == [conditions]
+
+
+def test_single_condition_is_wrapped_into_a_block():
+    assert _normalise_filter({"label": {"href": APP_HREF}}) == [[{"label": {"href": APP_HREF}}]]
+
+
+def test_omitted_filter_matches_anything():
+    """[] returns no flows at all; [[]] is match-anything."""
+    assert _normalise_filter(None) == [[]]
+    assert _normalise_filter([]) == [[]]
+
+
+def test_explicit_block_structure_is_respected():
+    """A caller who supplies blocks has chosen OR deliberately; do not rewrite."""
+    blocks = [[{"label": {"href": APP_HREF}}], [{"label": {"href": ENV_HREF}}]]
+    assert _normalise_filter(blocks) == blocks
+
+
+def test_sdk_accepts_what_we_produce():
+    """The contract check: TrafficQuery.build validates without a network, so
+    assert the SDK accepts our shape rather than asserting our own shape."""
+    from illumio import TrafficQuery
+    conditions = _resolve_filter_block(["app=vdi", ENV_HREF], {"app=vdi": APP_HREF}, [])
+    query = TrafficQuery.build(
+        start_date="2026-01-01T00:00:00Z", end_date="2026-01-02T23:59:59Z",
+        include_sources=_normalise_filter(conditions), include_destinations=[[]],
+        exclude_sources=[], exclude_destinations=[], include_services=[],
+        exclude_services=[], policy_decisions=[], max_results=10, query_name="contract",
+    )
+    assert query.sources.include == [[
+        {"label": {"href": APP_HREF}}, {"label": {"href": ENV_HREF}},
+    ]], "both conditions must land in a single AND-block"
+
+
+def test_workload_label_filter_is_a_single_and_group():
+    """[[a, b]] -> 23 workloads (ground truth); [[a], [b]] -> 138 (the union)."""
+    import json as _json
+    from illumio_mcp.tools.policy import _label_filter
+    assert _json.loads(_label_filter([APP_HREF, ENV_HREF])) == [[APP_HREF, ENV_HREF]]
+
+
+def test_ringfence_ands_app_and_env_in_one_block():
+    """Source guard: the AND form only shows its worth against a PCE where
+    hosts carry both labels, so pin it here."""
     import pathlib
     for name in ("ringfence.py", "policy.py"):
         src = (pathlib.Path("src/illumio_mcp/tools") / name).read_text()
-        assert "[[app_filter, env_filter]]" not in src, f"{name} rebuilt the broken filter"
+        assert "[[app_filter], [env_filter]]" not in src, (
+            f"{name} splits app and env into separate blocks, which ORs them"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Query window. The root cause behind "every tool except the summary returns
+# zero flows".
+#
+# Measured with one identical query, changing only the date format:
+#
+#     demo100   "2026-08-15"             ->   0 flows
+#     demo100   "2026-08-15T00:00:00Z"   -> 500 flows
+#     ag-demo   either form              -> 500 flows
+#
+# The stricter PCE returns an empty list with no error, so every tool that
+# built its own window with strftime('%Y-%m-%d') read empty while
+# get-traffic-flows-summary worked -- callers had been passing explicit
+# timestamps to that one by hand.
+# ---------------------------------------------------------------------------
+
+from illumio_mcp.tools.traffic import to_query_start, to_query_end   # noqa: E402
+
+
+def test_bare_date_is_expanded_to_a_full_timestamp():
+    assert to_query_start("2026-08-15") == "2026-08-15T00:00:00Z"
+    assert to_query_end("2026-09-14") == "2026-09-14T23:59:59Z"
+
+
+def test_end_of_window_covers_the_whole_day():
+    """23:59:59, not 00:00:00 -- otherwise 'today' silently excludes today."""
+    assert to_query_end("2026-09-14").endswith("T23:59:59Z")
+
+
+def test_an_explicit_timestamp_is_left_alone():
+    assert to_query_end("2026-09-14T12:00:00Z") == "2026-09-14T12:00:00Z"
+    assert to_query_start("2026-08-15T06:30:00Z") == "2026-08-15T06:30:00Z"
+
+
+def test_none_passes_through():
+    assert to_query_start(None) is None
+
+
+def test_no_tool_builds_a_date_only_query_window():
+    """Source guard. The failure is silent -- an empty flow list, no error --
+    so nothing downstream can detect it. Catches both quote styles, which is
+    how identify-infrastructure-services escaped the first sweep.
+    """
+    import pathlib
+    import re
+    offenders = []
+    tools = pathlib.Path("src/illumio_mcp/tools")
+    for path in sorted(tools.glob("*.py")):
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            if "start_date=" not in line and "end_date=" not in line:
+                continue
+            if re.search(r'strftime\(.%Y-%m-%d.\)', line) and "to_query_" not in line:
+                offenders.append(f"{path.name}:{n}: {line.strip()}")
+    assert not offenders, (
+        "date-only query window reaches TrafficQuery.build:\n  " + "\n  ".join(offenders)
+    )

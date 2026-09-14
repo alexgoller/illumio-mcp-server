@@ -1,14 +1,14 @@
 import json
 import logging
 from datetime import datetime, timedelta
+
 import pandas as pd
 import mcp.types as types
 from illumio import TrafficQuery
-from illumio.explorer.trafficanalysis import TrafficQueryFilter
-from illumio.util.jsonutils import Reference
+
 from ..pce import run_sync
-from .constants import MCP_BUG_MAX_RESULTS, MCP_MAX_RESPONSE_BYTES
 from ..log_scrub import ScrubbedArgs
+from .constants import MCP_BUG_MAX_RESULTS, MCP_MAX_RESPONSE_BYTES
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -60,6 +60,44 @@ def _build_split_response(df, total_pce_flows, total_grouped_rows):
 # Filter resolution
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Query window
+# ---------------------------------------------------------------------------
+
+def to_query_start(value) -> str:
+    """Normalise a window start to full ISO-8601 with an explicit UTC zone."""
+    return _iso(value, "T00:00:00Z")
+
+
+def to_query_end(value) -> str:
+    """Normalise a window end, defaulting to the end of the given day."""
+    return _iso(value, "T23:59:59Z")
+
+
+def _iso(value, suffix: str) -> str:
+    """Expand a bare YYYY-MM-DD into a full timestamp.
+
+    Not cosmetic. Some PCEs accept a date-only string and return an empty flow
+    list -- no error, no warning -- while the same window with explicit times
+    returns data. Verified on two PCEs with an identical query:
+
+        demo100   "2026-08-15"            ->   0 flows
+        demo100   "2026-08-15T00:00:00Z"  -> 500 flows
+        ag-demo   either form             -> 500 flows
+
+    Every tool that built its own window with strftime('%Y-%m-%d') therefore
+    read empty against the stricter PCE while get-traffic-flows-summary worked,
+    because callers passed explicit timestamps to that one by hand.
+    """
+    if value is None:
+        return value
+    text = str(value).strip()
+    if len(text) == 10 and text.count("-") == 2:
+        return text + suffix
+    return text
+
+
 def _label_lookup(pce) -> dict:
     """Map "key=value" -> label href, for resolving human-readable filters."""
     return {
@@ -82,16 +120,16 @@ def _resolve_filter_block(block, lookup: dict, unresolved: list):
     """
     if isinstance(block, list):
         return [_resolve_filter_block(item, lookup, unresolved) for item in block]
+    if isinstance(block, str) and block.startswith("/orgs/") and "/labels/" in block:
+        # A bare label HREF. Left as a raw string it reaches TrafficQuery.build
+        # nested inside a list, where the SDK's _parse_traffic_filters skips it
+        # (not a str at the top level) and validation fails with
+        # "Invalid value for include".
+        return {"label": {"href": block}}
     if isinstance(block, str) and "=" in block and not block.startswith("/"):
         href = lookup.get(block.strip())
         if href:
-            # Return the bare HREF string, not a wrapped dict. The SDK's
-            # _parse_traffic_filters coerces strings itself -- href -> label
-            # ref, FQDN -> fqdn, dotted quad -> ip_address -- and wraps each
-            # into its own AND-block. Anything that is not a str it passes
-            # through untouched, so a dict or a nested list skips coercion
-            # and then fails validation with "Invalid value for include".
-            return href
+            return {"label": {"href": href}}
         unresolved.append(block)
         return block
     return block
@@ -104,18 +142,21 @@ def _resolve_label_filters(pce, arguments: dict) -> list:
     if not any(arguments.get(a) for a in filter_args):
         return []
 
+    # Bare HREFs need converting too, and they contain no "=", so this cannot
+    # short-circuit on shorthand alone -- that is why /orgs/.../labels/... kept
+    # reaching TrafficQuery.build as a raw string.
     needs_lookup = any(
         "=" in str(arguments.get(a, "")) for a in filter_args
     )
-    if not needs_lookup:
-        return []
 
     unresolved: list = []
-    try:
-        lookup = _label_lookup(pce)
-    except Exception:
-        logger.exception("Could not load labels to resolve filter shorthand")
-        return []
+    lookup = {}
+    if needs_lookup:
+        try:
+            lookup = _label_lookup(pce)
+        except Exception:
+            logger.exception("Could not load labels to resolve filter shorthand")
+            return []
     for arg in filter_args:
         if arguments.get(arg):
             arguments[arg] = _resolve_filter_block(arguments[arg], lookup, unresolved)
@@ -153,34 +194,26 @@ def _unresolved_error(unresolved: list, pce) -> dict | None:
 def _normalise_filter(value):
     """Shape a filter argument for TrafficQuery.build.
 
-    The SDK wants a FLAT list of strings and does the block-wrapping itself
-    (illumio.explorer.trafficanalysis._parse_traffic_filters): each string
-    becomes its own AND-block, so ["<app href>", "<env href>"] means
-    "app AND env" -- verified on a live PCE, 274 flows.
+    Explorer takes a list of AND-blocks. Conditions inside ONE block are ANDed;
+    separate blocks are ORed. Verified on a live PCE with app=ordering and
+    env=Production:
 
-    Wrapping it ourselves is what broke this: [["<href>"]] makes the SDK see a
-    list rather than a string, skip coercion, and fail validation with
-    "Invalid value for include". An empty filter is the one case that does need
-    explicit wrapping -- [] yields no flows at all, [[]] means "match
-    anything".
+        [[app, env]]    -> 233 flows, every one ordering/Production   (AND)
+        [[app], [env]]  -> 500 flows, mixed apps and envs             (OR)
+
+    So a caller passing ["app=ordering", "env=Production"] means AND, and the
+    conditions go into a single block. An omitted filter is [[]] -- matches
+    anything -- because [] returns no flows at all.
     """
     if not value:
         return [[]]
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list) and any(isinstance(v, list) for v in value):
-        # Already block-shaped (or mixed). Flatten one level so the SDK can
-        # coerce the strings inside.
-        flat = []
-        for item in value:
-            flat.extend(item if isinstance(item, list) else [item])
-        return flat or [[]]
-    return list(value)
+    if isinstance(value, (str, dict)):
+        return [[value]]
+    items = list(value)
+    if items and all(isinstance(v, list) for v in items):
+        return items          # caller already chose the block structure
+    return [items]
 
-
-# ---------------------------------------------------------------------------
-# Raw flow retrieval
-# ---------------------------------------------------------------------------
 
 def fetch_flows_raw(pce, traffic_query, query_name: str) -> list:
     """Run an async Explorer query and return the raw JSON flow dicts.
@@ -710,9 +743,17 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
 
     # assume a default start date of 1 day ago and end date of now
     if 'start_date' not in arguments:
-        arguments['start_date'] = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        arguments['start_date'] = to_query_start(
+            (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d'))
     if 'end_date' not in arguments:
-        arguments['end_date'] = datetime.now().strftime('%Y-%m-%d')
+        arguments['end_date'] = to_query_end(datetime.now().strftime('%Y-%m-%d'))
+
+    # A caller-supplied bare date is normalised too: some PCEs return an empty
+    # flow list for date-only windows without erroring.
+    if arguments.get('start_date'):
+        arguments['start_date'] = to_query_start(arguments['start_date'])
+    if arguments.get('end_date'):
+        arguments['end_date'] = to_query_end(arguments['end_date'])
 
     if not arguments or 'start_date' not in arguments or 'end_date' not in arguments:
         error_msg = "Missing required arguments: 'start_date' and 'end_date' are required"
@@ -823,6 +864,11 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
     logger.debug(f"Query Name: {arguments.get('query_name')}")
     logger.debug("=" * 80)
 
+    if arguments.get('start_date'):
+        arguments['start_date'] = to_query_start(arguments['start_date'])
+    if arguments.get('end_date'):
+        arguments['end_date'] = to_query_end(arguments['end_date'])
+
     try:
         pce = ctx.pce
 
@@ -902,8 +948,8 @@ def handle_find_unmanaged_traffic(ctx, arguments: dict) -> list:
         min_connections = arguments.get("min_connections", 1)
         top_n = arguments.get("top_n", 50)
 
-        start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = to_query_start((datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d'))
+        end_date = to_query_end(datetime.now().strftime('%Y-%m-%d'))
 
         traffic_query = TrafficQuery.build(
             start_date=start_date,
@@ -1032,6 +1078,9 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
     arguments.setdefault('start_date',
                          (datetime.now() - timedelta(days=lookback)).strftime('%Y-%m-%d'))
     arguments.setdefault('end_date', datetime.now().strftime('%Y-%m-%d'))
+    # Caller-supplied dates go through the same normalisation.
+    arguments['start_date'] = to_query_start(arguments['start_date'])
+    arguments['end_date'] = to_query_end(arguments['end_date'])
 
     try:
         pce = ctx.pce
