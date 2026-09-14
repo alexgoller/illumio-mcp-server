@@ -2290,7 +2290,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to include (label/IP list/workload HREFs, FQDNs, IPs)"
+                        "description": "Sources to include. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), which the server resolves to a label HREF, as well as label/IP list/workload HREFs, FQDNs and IPs. Omit to match all sources."
                     },
                     "exclude_sources": {
                         "type": "array",
@@ -2300,7 +2300,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_destinations": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Destinations to include (label/IP list/workload HREFs, FQDNs, IPs)"
+                        "description": "Destinations to include. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), as well as label/IP list/workload HREFs, FQDNs and IPs. Omit to match all destinations."
                     },
                     "exclude_destinations": {
                         "type": "array",
@@ -2343,7 +2343,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get-traffic-flows-summary",
-            description="Get traffic flows from the PCE in a summarized text format, this is a text format that is not a dataframe, it also is not json, the form is: 'From <source> to <destination> on <port> <proto>: <number of connections>'",
+            description="Summarize traffic flows as structured JSON. Sections: by_process (which binary talks to which destination, on which port, under which policy, and as which user), external_destinations (traffic leaving the managed estate), blocked (what policy is stopping), app_to_app (coarse view). Prefer this over get-traffic-flows for analysis - it is far smaller and answers the usual questions directly.",
             inputSchema={
                 "type": "object",
                 "properties": {
