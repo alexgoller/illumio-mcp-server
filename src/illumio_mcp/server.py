@@ -2302,6 +2302,11 @@ async def handle_list_tools() -> list[types.Tool]:
                         "items": {"type": "string"},
                         "description": "Destinations to include. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), as well as label/IP list/workload HREFs, FQDNs and IPs. Omit to match all destinations."
                     },
+                    "group_by": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Dimensions to aggregate by. Any of: process, service_name, user, source, source_app, destination, dest_app, fqdn, ip_list, port, proto, policy, rule, direction. Fewer dimensions gives fewer, larger rows - e.g. ['process','fqdn'] answers 'which binary talks to which external name'. Defaults to a full per-flow breakdown."
+                    },
                     "exclude_destinations": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -2339,6 +2344,46 @@ async def handle_list_tools() -> list[types.Tool]:
                     "query_name": {"type": "string"}
                 },
                 "required": ["start_date", "end_date"]
+            }
+        ),
+        types.Tool(
+            name="discover-process-egress",
+            description=(
+                "Find which processes talk to destinations outside this PCE's managed "
+                "estate - the shadow-IT / unsanctioned-egress question. Returns ranked "
+                "findings of process -> external destination with port, protocol, the "
+                "user, current policy decision and volume, preferring an FQDN over a bare "
+                "IP where the PCE resolved one. Use this instead of get-traffic-flows when "
+                "the question is 'what is talking out', not 'show me all traffic'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lookback_days": {"type": "integer", "description": "Days to look back. Default 7. Ignored if start_date is given."},
+                    "start_date": {"type": "string", "description": "Start (YYYY-MM-DD). Overrides lookback_days."},
+                    "end_date": {"type": "string", "description": "End (YYYY-MM-DD). Defaults to now."},
+                    "process": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Only these processes. Substring, case-insensitive, e.g. ['claude','chrome']. Omit for all."
+                    },
+                    "include_sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Restrict to these sources. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), HREFs, IPs or FQDNs."
+                    },
+                    "only_named_processes": {
+                        "type": "boolean",
+                        "description": "Default true. When false, also returns egress with no process attribution (the PCE only reports process names where the VEN has process visibility enabled)."
+                    },
+                    "policy_decisions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by decision, e.g. ['allowed'] to show only egress current policy permits."
+                    },
+                    "limit": {"type": "integer", "description": "Max findings returned. Default 50."},
+                    "max_results": {"type": "integer", "description": "Max flows to pull from the PCE. Capped at 500."}
+                }
             }
         ),
         types.Tool(

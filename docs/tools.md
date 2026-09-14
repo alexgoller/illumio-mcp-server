@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 46 tools, grouped by area. Generated from the server's own registry by
+All 47 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -122,6 +122,12 @@ which other apps communicate with this... |
 | `get-events` | reader | *read* | Get events from the PCE with optional filtering |
 | `get-pairing-profiles` | reader | *read* | Get pairing profiles from the PCE. Pairing profiles define the initial enforcement mode and labels for VENs when they pair with... |
 | `register-pce-credentials` | reader | **write** | Register (or overwrite) PCE credentials for the current authenticated user. After registering, all PCE tools become available i... |
+
+## Other
+
+| Tool | Access | Type | Description |
+|---|---|---|---|
+| `discover-process-egress` | reader | *read* | Find which processes talk to destinations outside this PCE's managed estate - the shadow-IT / unsanctioned-egress question. Returns ranked findings of process -> external destination with port, protocol, the user, current policy decision and volume, preferring an FQDN over a bare IP where the PCE resolved one. Use this instead of get-traffic-flows when the question is 'what is talking out', not 'show me all traffic'. |
 
 ## Confirmation-gated tools
 
