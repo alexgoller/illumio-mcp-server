@@ -85,7 +85,7 @@ Builds an app-to-app communication graph and com... |
 |---|---|---|---|
 | `find-unmanaged-traffic` | reader | *read* | Find traffic involving unmanaged (unlabeled) workloads or IP addresses. These are sources or destinations without app/env label... |
 | `get-traffic-flows` | reader | *read* | Get traffic flows from the PCE with comprehensive filtering options |
-| `get-traffic-flows-summary` | reader | *read* | Get traffic flows from the PCE in a summarized text format, this is a text format that is not a dataframe, it also is not json,... |
+| `get-traffic-flows-summary` | reader | *read* | Summarize traffic flows as structured JSON. Sections: by_process (which binary talks to which destination, on which port, under... |
 
 ## Ringfencing and threat analysis
 

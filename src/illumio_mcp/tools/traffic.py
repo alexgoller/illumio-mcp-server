@@ -55,6 +55,137 @@ def _build_split_response(df, total_pce_flows, total_grouped_rows):
     return _serialize(best)
 
 
+
+# ---------------------------------------------------------------------------
+# Filter resolution
+# ---------------------------------------------------------------------------
+
+def _label_lookup(pce) -> dict:
+    """Map "key=value" -> label href, for resolving human-readable filters."""
+    return {
+        f"{l.key}={l.value}": l.href
+        for l in pce.labels.get(params={'max_results': 10000})
+    }
+
+
+def _resolve_filter_block(block, lookup: dict, unresolved: list):
+    """Resolve "key=value" label filters to hrefs, recursively.
+
+    The Explorer API only accepts label HREFs, IP-list HREFs, workload HREFs,
+    IPs or FQDNs. Passing "app=vdi" through verbatim makes the PCE reject the
+    whole query with "Invalid traffic filter type", which forced callers to run
+    get-labels first and paste an href. Resolving here makes the documented
+    shorthand actually work and keeps it to one tool call.
+
+    Anything that is not a bare "key=value" string is passed through untouched,
+    so hrefs, IPs, FQDNs and already-structured dicts keep working.
+    """
+    if isinstance(block, list):
+        return [_resolve_filter_block(item, lookup, unresolved) for item in block]
+    if isinstance(block, str) and "=" in block and not block.startswith("/"):
+        href = lookup.get(block.strip())
+        if href:
+            return {"label": {"href": href}}
+        unresolved.append(block)
+        return block
+    return block
+
+
+def _resolve_label_filters(pce, arguments: dict) -> list:
+    """Resolve label shorthand in every filter argument. Returns unresolved keys."""
+    filter_args = ("include_sources", "exclude_sources",
+                   "include_destinations", "exclude_destinations")
+    if not any(arguments.get(a) for a in filter_args):
+        return []
+
+    needs_lookup = any(
+        "=" in str(arguments.get(a, "")) for a in filter_args
+    )
+    if not needs_lookup:
+        return []
+
+    unresolved: list = []
+    try:
+        lookup = _label_lookup(pce)
+    except Exception:
+        logger.exception("Could not load labels to resolve filter shorthand")
+        return []
+    for arg in filter_args:
+        if arguments.get(arg):
+            arguments[arg] = _resolve_filter_block(arguments[arg], lookup, unresolved)
+    return unresolved
+
+
+def _unresolved_error(unresolved: list, pce) -> dict | None:
+    """Fail fast on a label filter that matched nothing.
+
+    Forwarding an unresolved "key=value" to the Explorer API makes the PCE
+    reject the whole query with "Invalid traffic filter type", which tells the
+    caller nothing about which filter was wrong. Naming it here, with the valid
+    values for that key, turns a dead end into a correctable mistake.
+    """
+    if not unresolved:
+        return None
+    hints = {}
+    for item in unresolved:
+        key = str(item).split("=", 1)[0].strip()
+        try:
+            values = sorted({l.value for l in pce.labels.get(
+                params={'key': key, 'max_results': 100}) if l.value})
+        except Exception:
+            values = []
+        hints[item] = values[:25] or f"no labels exist with key {key!r}"
+    return {
+        "error": "unresolved_label_filter",
+        "message": ("These filters matched no label in the PCE, so the query was "
+                    "not sent. Use key=value with an existing value."),
+        "unresolved": unresolved,
+        "valid_values": hints,
+    }
+
+
+def _normalise_filter(value):
+    """Explorer expects a list of OR-blocks, each a list of AND-conditions.
+
+    An omitted filter must be [[]] ("match anything"), not []. A caller passing
+    a flat list like ["app=vdi"] means one block, so wrap it.
+    """
+    if not value:
+        return [[]]
+    if isinstance(value, list) and value and not isinstance(value[0], list):
+        return [value]
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Raw flow retrieval
+# ---------------------------------------------------------------------------
+
+def fetch_flows_raw(pce, traffic_query, query_name: str) -> list:
+    """Run an async Explorer query and return the raw JSON flow dicts.
+
+    Mirrors PolicyComputeEngine.get_traffic_flows_async, but stops before
+    `TrafficFlow.from_json`. The SDK's TrafficNode dataclass only keeps
+    ip/label/workload/ip_lists/virtual_server/virtual_service, so fields the
+    Explorer API does return -- notably `dst.fqdn` -- are discarded during
+    typing and are unrecoverable afterwards. Process and FQDN detail is the
+    whole point of this tool, so we keep the raw payload.
+    """
+    traffic_query.query_name = query_name
+    response = pce.post(
+        '/traffic_flows/async_queries',
+        json=traffic_query,
+        headers={'Content-Type': 'application/json',
+                 'Prefer': 'respond-async',
+                 'Accept': 'application/json'},
+        include_org=True,
+    )
+    response.raise_for_status()
+    collection_href = pce._async_poll(response.json()['href'])
+    collection = pce.get(collection_href)
+    collection.raise_for_status()
+    return collection.json()
+
 def to_dataframe(pce, flows):
 
     label_href_map = {}
@@ -121,6 +252,239 @@ def to_dataframe(pce, flows):
 
     df = pd.DataFrame(series_array)
     return df
+
+
+
+# Sentinel used in place of NaN in group keys. pandas' groupby drops any row
+# with a NaN in a grouping column, which silently deleted every flow whose
+# destination had no workload -- i.e. exactly the outbound/endpoint traffic
+# these tools exist to surface.
+NA = "-"
+
+
+def raw_flows_to_dataframe(pce, raw_flows: list) -> pd.DataFrame:
+    """Build a DataFrame from raw Explorer JSON, keeping process and FQDN.
+
+    Unlike the typed path this preserves service.process_name,
+    service.windows_service_name, service.user_name and dst.fqdn.
+    """
+    if not raw_flows:
+        logger.warning("Empty flows list received")
+        return pd.DataFrame()
+
+    label_href_map = {}
+    try:
+        for l in pce.labels.get(params={'max_results': 10000}):
+            label_href_map[l.href] = {"key": l.key, "value": l.value}
+    except Exception:
+        logger.exception("Could not load labels; flows will lack label columns")
+
+    def node(side: dict, prefix: str, row: dict) -> None:
+        row[f'{prefix}_ip'] = side.get('ip')
+        row[f'{prefix}_fqdn'] = side.get('fqdn')
+        workload = side.get('workload') or {}
+        row[f'{prefix}_hostname'] = workload.get('hostname') or workload.get('name')
+        names = [i.get('name') for i in (side.get('ip_lists') or []) if i.get('name')]
+        row[f'{prefix}_ip_lists'] = ', '.join(names) if names else None
+        for label in (workload.get('labels') or []):
+            meta = label_href_map.get(label.get('href'))
+            if meta:
+                row[f"{prefix}_{meta['key']}"] = meta['value']
+
+    rows = []
+    skipped = 0
+    for flow in raw_flows:
+        try:
+            service = flow.get('service') or {}
+
+            def clean(value):
+                # The PCE sends "" for an unknown process/user as often as it
+                # omits the field. Treating those differently splits one group
+                # in two and puts a nameless entry at the top of the ranking.
+                if value is None:
+                    return None
+                text = str(value).strip()
+                return text or None
+
+            row = {
+                'proto': service.get('proto'),
+                'port': service.get('port'),
+                'process_name': clean(service.get('process_name')),
+                'windows_service_name': clean(service.get('windows_service_name')),
+                'user_name': clean(service.get('user_name')),
+                'policy_decision': flow.get('policy_decision'),
+                'flow_direction': flow.get('flow_direction'),
+                'num_connections': flow.get('num_connections') or 0,
+            }
+            node(flow.get('src') or {}, 'src', row)
+            node(flow.get('dst') or {}, 'dst', row)
+            rows.append(row)
+        except Exception:
+            skipped += 1
+    if skipped:
+        # Never silent: a parse failure used to be a DEBUG line, invisible at
+        # the INFO default, so "0 rows from 500 flows" looked like empty data.
+        logger.warning("Skipped %d of %d flows that could not be parsed",
+                       skipped, len(raw_flows))
+    return pd.DataFrame(rows)
+
+
+def _endpoint_label(row, prefix: str) -> str:
+    """Human-readable identity for one side of a flow.
+
+    Preference order matters for the outbound case: an FQDN is the most useful
+    thing to show, then a named IP list, then the workload hostname, then the
+    bare IP.
+    """
+    for col in (f'{prefix}_fqdn', f'{prefix}_ip_lists', f'{prefix}_hostname', f'{prefix}_ip'):
+        value = row.get(col)
+        if value and value != NA:
+            return str(value)
+    app = row.get(f'{prefix}_app')
+    if app and app != NA:
+        env = row.get(f'{prefix}_env')
+        return f"{app} ({env})" if env and env != NA else str(app)
+    return "unknown"
+
+def _top(frame, by="num_connections", limit=25):
+    return frame.sort_values(by, ascending=False).head(limit)
+
+
+def summarize_traffic_structured(df: pd.DataFrame, *, limit: int = 25) -> dict:
+    """Process-aware structured summary of a traffic DataFrame.
+
+    Answers the questions people actually ask of Explorer data, in priority
+    order, instead of emitting one flat line per (src, dst, port) group:
+
+      by_process            which binary is talking, to what, on which port
+      external_destinations traffic leaving the managed estate
+      blocked               what policy is already stopping
+      app_to_app            the coarse app-to-app view
+
+    Every grouping fills NaN with a sentinel first. pandas' groupby drops rows
+    with a NaN in any group key, which previously deleted every flow whose
+    destination had no workload -- i.e. all outbound traffic.
+    """
+    if df is None or df.empty:
+        return {"totals": {"rows": 0, "connections": 0}, "note": "no flows in window"}
+
+    df = df.copy()
+    if 'num_connections' not in df.columns:
+        df['num_connections'] = 0
+    df['num_connections'] = pd.to_numeric(df['num_connections'], errors='coerce').fillna(0)
+
+    for col in df.columns:
+        if col != 'num_connections':
+            df[col] = df[col].fillna(NA)
+
+    df['src_label'] = df.apply(lambda r: _endpoint_label(r, 'src'), axis=1)
+    df['dst_label'] = df.apply(lambda r: _endpoint_label(r, 'dst'), axis=1)
+
+    out: dict = {
+        "totals": {
+            "rows": int(len(df)),
+            "connections": int(df['num_connections'].sum()),
+            "distinct_processes": int(
+                df.loc[df['process_name'] != NA, 'process_name'].nunique()
+            ) if 'process_name' in df.columns else 0,
+        }
+    }
+
+    # --- by process: the headline view -------------------------------------
+    if 'process_name' in df.columns:
+        procs = df[~df['process_name'].isin([NA, ''])]
+        if not procs.empty:
+            grouped = (procs.groupby(['process_name', 'dst_label', 'port', 'proto',
+                                      'policy_decision'], dropna=False)['num_connections']
+                       .sum().reset_index())
+            by_process = []
+            for name, chunk in grouped.groupby('process_name'):
+                dests = [
+                    {"to": r.dst_label, "port": _int(r.port), "proto": _proto(r.proto),
+                     "policy": r.policy_decision, "connections": int(r.num_connections)}
+                    for r in _top(chunk, limit=10).itertuples()
+                ]
+                users = sorted({u for u in procs.loc[procs['process_name'] == name,
+                                                     'user_name'].unique()
+                                if u not in (NA, '')})
+                by_process.append({
+                    "process": name,
+                    "connections": int(chunk['num_connections'].sum()),
+                    "destination_count": int(chunk['dst_label'].nunique()),
+                    "users": users[:5],
+                    "destinations": dests,
+                })
+            by_process.sort(key=lambda p: p['connections'], reverse=True)
+            out['by_process'] = by_process[:limit]
+        else:
+            out['by_process'] = []
+            out['note_process'] = (
+                "No process names in this window. The PCE only reports them for "
+                "flows observed by a VEN with process visibility enabled."
+            )
+
+    # --- traffic leaving the managed estate --------------------------------
+    external = df[(df.get('dst_hostname', NA) == NA)]
+    if not external.empty:
+        cols = ['dst_label', 'port', 'proto', 'policy_decision']
+        if 'process_name' in external.columns:
+            cols.insert(0, 'process_name')
+        ext = (external.groupby(cols, dropna=False)['num_connections']
+               .sum().reset_index())
+        out['external_destinations'] = [
+            {k: (_int(getattr(r, k)) if k == 'port'
+                 else _proto(getattr(r, k)) if k == 'proto'
+                 else getattr(r, k)) for k in cols}
+            | {"connections": int(r.num_connections)}
+            for r in _top(ext, limit=limit).itertuples()
+        ]
+
+    # --- what policy is stopping -------------------------------------------
+    if 'policy_decision' in df.columns:
+        blocked = df[df['policy_decision'].isin(['blocked', 'potentially_blocked'])]
+        if not blocked.empty:
+            cols = ['src_label', 'dst_label', 'port', 'proto', 'policy_decision']
+            if 'process_name' in blocked.columns:
+                cols.insert(0, 'process_name')
+            b = blocked.groupby(cols, dropna=False)['num_connections'].sum().reset_index()
+            out['blocked'] = [
+                {k: (_int(getattr(r, k)) if k == 'port'
+                     else _proto(getattr(r, k)) if k == 'proto'
+                     else getattr(r, k)) for k in cols}
+                | {"connections": int(r.num_connections)}
+                for r in _top(b, limit=limit).itertuples()
+            ]
+
+    # --- coarse app-to-app --------------------------------------------------
+    if 'src_app' in df.columns or 'dst_app' in df.columns:
+        a2a = (df.groupby(['src_label', 'dst_label', 'policy_decision'], dropna=False)
+               ['num_connections'].sum().reset_index())
+        a2a = a2a[a2a['src_label'] != a2a['dst_label']]
+        out['app_to_app'] = [
+            {"from": r.src_label, "to": r.dst_label,
+             "policy": r.policy_decision, "connections": int(r.num_connections)}
+            for r in _top(a2a, limit=limit).itertuples()
+        ]
+
+    return out
+
+
+def _int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+_PROTO_NAMES = {6: "tcp", 17: "udp", 1: "icmp"}
+
+
+def _proto(value):
+    """Explorer reports protocol numerically; 6/17 mean nothing to a reader."""
+    try:
+        return _PROTO_NAMES.get(int(value), int(value))
+    except (TypeError, ValueError):
+        return value
 
 
 def summarize_traffic(df):
@@ -241,12 +605,17 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
         logger.debug(f"Due to a condition in MCP, max results is set to {MCP_BUG_MAX_RESULTS}")
         arguments['max_results'] = MCP_BUG_MAX_RESULTS
 
+        unresolved = _resolve_label_filters(pce, arguments)
+        problem = _unresolved_error(unresolved, pce)
+        if problem:
+            return [types.TextContent(type="text", text=json.dumps(problem))]
+
         traffic_query = TrafficQuery.build(
             start_date=arguments['start_date'],
             end_date=arguments['end_date'],
-            include_sources=arguments.get('include_sources', [[]]),
+            include_sources=_normalise_filter(arguments.get('include_sources')),
             exclude_sources=arguments.get('exclude_sources', []),
-            include_destinations=arguments.get('include_destinations', [[]]),
+            include_destinations=_normalise_filter(arguments.get('include_destinations')),
             exclude_destinations=arguments.get('exclude_destinations', []),
             include_services=arguments.get('include_services', []),
             exclude_services=arguments.get('exclude_services', []),
@@ -256,15 +625,10 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
             query_name=arguments.get('query_name', 'mcp-traffic-query')
         )
 
-        # Use async query with Accept: application/json header
-        # PCE 25.x returns CSV by default on download endpoint
-        all_traffic = pce.get_traffic_flows_async(
-            query_name=arguments.get('query_name', 'mcp-traffic-query'),
-            traffic_query=traffic_query,
-            headers={'Accept': 'application/json'}
-        )
+        all_traffic = fetch_flows_raw(
+            pce, traffic_query, arguments.get('query_name', 'mcp-traffic-query'))
 
-        df = to_dataframe(pce, all_traffic)
+        df = raw_flows_to_dataframe(pce, all_traffic)
 
         if df.empty:
             return [types.TextContent(
@@ -274,13 +638,22 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
                                  "end_date": arguments['end_date']})
             )]
 
-        # Group by columns that exist, always including IP list names
-        group_cols = ['src_ip', 'dst_ip', 'proto', 'port', 'policy_decision']
-        for col in ['src_ip_lists', 'dst_ip_lists', 'src_hostname', 'dst_hostname']:
-            if col in df.columns:
-                group_cols.append(col)
+        # Group by columns that exist. process_name / fqdn / user_name are part
+        # of the key, not dropped: they are the whole reason to call this tool.
+        group_cols = ['src_ip', 'dst_ip', 'proto', 'port', 'policy_decision',
+                      'process_name', 'windows_service_name', 'user_name',
+                      'src_fqdn', 'dst_fqdn',
+                      'src_ip_lists', 'dst_ip_lists', 'src_hostname', 'dst_hostname']
         group_cols = [c for c in group_cols if c in df.columns]
-        df = df.groupby(group_cols).agg({'num_connections': 'sum'}).reset_index()
+
+        # Fill NaN before grouping. pandas drops any row with a NaN in a group
+        # key, which silently discarded every flow whose destination had no
+        # workload -- 500 flows in, 0 rows out.
+        for col in group_cols:
+            df[col] = df[col].fillna(NA)
+        df = df.groupby(group_cols, dropna=False).agg({'num_connections': 'sum'}).reset_index()
+        if 'proto' in df.columns:
+            df['proto'] = df['proto'].map(_proto)
 
         total_grouped_rows = len(df)
         payload = _build_split_response(df, total_pce_flows=len(all_traffic), total_grouped_rows=total_grouped_rows)
@@ -327,12 +700,17 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
             max_results = MCP_BUG_MAX_RESULTS
         arguments['max_results'] = max_results
 
+        unresolved = _resolve_label_filters(pce, arguments)
+        problem = _unresolved_error(unresolved, pce)
+        if problem:
+            return [types.TextContent(type="text", text=json.dumps(problem))]
+
         query = TrafficQuery.build(
             start_date=arguments['start_date'],
             end_date=arguments['end_date'],
-            include_sources=arguments.get('include_sources', [[]]),
+            include_sources=_normalise_filter(arguments.get('include_sources')),
             exclude_sources=arguments.get('exclude_sources', []),
-            include_destinations=arguments.get('include_destinations', [[]]),
+            include_destinations=_normalise_filter(arguments.get('include_destinations')),
             exclude_destinations=arguments.get('exclude_destinations', []),
             include_services=arguments.get('include_services', []),
             exclude_services=arguments.get('exclude_services', []),
@@ -342,32 +720,32 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
             query_name=arguments.get('query_name', 'mcp-traffic-summary')
         )
 
-        # Use async query with Accept: application/json header
-        # PCE 25.x returns CSV by default on download endpoint
-        all_traffic = pce.get_traffic_flows_async(
-            query_name=arguments.get('query_name', 'mcp-traffic-summary'),
-            traffic_query=query,
-            headers={'Accept': 'application/json'}
-        )
+        all_traffic = fetch_flows_raw(
+            pce, query, arguments.get('query_name', 'mcp-traffic-summary'))
 
-        df = to_dataframe(pce, all_traffic)
-        summary = summarize_traffic(df)
+        df = raw_flows_to_dataframe(pce, all_traffic)
+        summary = summarize_traffic_structured(df)
+        summary['window'] = {'start': arguments['start_date'], 'end': arguments['end_date']}
+        summary['totals']['pce_flows'] = len(all_traffic)
+        summary['totals']['truncated_at'] = max_results
+        if unresolved:
+            summary['unresolved_filters'] = unresolved
+            summary['unresolved_hint'] = (
+                "These label filters matched no label and were sent verbatim. "
+                "Use key=value, e.g. app=vdi, or call get-labels for the exact values."
+            )
 
-        summary_lines = ""
-        # Ensure the summary is a list of strings
-        if isinstance(summary, list):
-            # join list to be one string separated by newlines
-            summary_lines = "\n".join(summary)
-        else:
-            summary_lines = str(summary)
+        payload = json.dumps(summary, default=str)
+        if len(payload) > MCP_MAX_RESPONSE_BYTES:
+            for section in ('app_to_app', 'blocked', 'external_destinations', 'by_process'):
+                if section in summary and len(payload) > MCP_MAX_RESPONSE_BYTES:
+                    summary[section] = summary[section][:5]
+                    summary.setdefault('truncated_sections', []).append(section)
+                    payload = json.dumps(summary, default=str)
+            logger.warning("Summary truncated to fit the %d byte MCP limit",
+                           MCP_MAX_RESPONSE_BYTES)
 
-        logger.debug(f"Summary data type: {type(summary_lines)}")
-        logger.debug(f"Summary size: {len(summary_lines)}")
-
-        return [types.TextContent(
-            type="text",
-            text=summary_lines
-        )]
+        return [types.TextContent(type="text", text=payload)]
     except Exception as e:
         error_msg = f"Failed in PCE operation: {str(e)}"
         logger.error(error_msg, exc_info=True)
