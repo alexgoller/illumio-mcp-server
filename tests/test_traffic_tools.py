@@ -134,10 +134,16 @@ def test_blocked_traffic_is_called_out():
 # --- finding 1: label shorthand -------------------------------------------
 
 def test_label_shorthand_resolves_to_href():
+    """Resolves to a bare HREF string.
+
+    This test previously asserted a {"label": {"href": ...}} dict, which is what
+    the code produced and what the SDK silently refuses to coerce. The test
+    passed while the feature was broken -- it encoded my assumption about the
+    SDK rather than the SDK's actual contract.
+    """
     lookup = {"app=vdi": "/orgs/1/labels/1"}
     unresolved = []
-    assert _resolve_filter_block(["app=vdi"], lookup, unresolved) == \
-        [{"label": {"href": "/orgs/1/labels/1"}}]
+    assert _resolve_filter_block(["app=vdi"], lookup, unresolved) == ["/orgs/1/labels/1"]
     assert unresolved == []
 
 
@@ -160,12 +166,15 @@ def test_empty_filter_becomes_match_all():
     assert _normalise_filter([]) == [[]]
 
 
-def test_flat_filter_list_is_wrapped_into_one_block():
-    assert _normalise_filter(["app=vdi"]) == [["app=vdi"]]
+def test_flat_filter_list_is_left_flat_for_the_sdk():
+    """Previously asserted [["app=vdi"]]. Wrapping is the SDK's job, and doing
+    it ourselves is exactly what made TrafficQuery.build reject the filter."""
+    assert _normalise_filter(["app=vdi"]) == ["app=vdi"]
 
 
-def test_already_nested_filter_is_left_alone():
-    assert _normalise_filter([["app=vdi"]]) == [["app=vdi"]]
+def test_already_nested_filter_is_flattened():
+    """Legacy callers pass [[...]]; flatten it so the SDK can coerce the string."""
+    assert _normalise_filter([["app=vdi"]]) == ["app=vdi"]
 
 
 def test_empty_dataframe_summarises_without_crashing():
@@ -245,3 +254,218 @@ def test_bytes_are_summed_when_present():
     grouped, _, _ = group_flows(df, ["process"])
     assert grouped.iloc[0]["bytes_in"] == 101
     assert grouped.iloc[0]["bytes_out"] == 52
+
+
+# ---------------------------------------------------------------------------
+# Filter shaping. The SDK's _parse_traffic_filters coerces STRINGS and wraps
+# each into its own AND-block; anything non-str it passes through untouched,
+# which then fails validation with "Invalid value for include". So our job is
+# to hand it flat strings, not to pre-wrap.
+# ---------------------------------------------------------------------------
+
+HREF = "/orgs/1/labels/74"
+ENV_HREF = "/orgs/1/labels/126"
+
+
+def test_label_shorthand_becomes_a_bare_href_string():
+    """Not a {'label': {'href': ...}} dict: the SDK skips coercion on non-str."""
+    unresolved = []
+    assert _resolve_filter_block(["app=vdi"], {"app=vdi": HREF}, unresolved) == [HREF]
+    assert unresolved == []
+
+
+def test_bare_href_passes_through_as_a_string():
+    """Regression: a raw HREF used to reach TrafficQuery.build nested one level
+    deep, raising AttributeError('Invalid value for include')."""
+    assert _normalise_filter([HREF]) == [HREF]
+
+
+def test_nested_filter_is_flattened_for_the_sdk():
+    """Callers (and our own older code) pass [[href]]; flatten rather than reject."""
+    assert _normalise_filter([[HREF]]) == [HREF]
+
+
+def test_two_labels_stay_flat_so_the_sdk_ands_them():
+    """['app','env'] becomes [[app],[env]] inside the SDK -- an AND. Verified
+    on a live PCE: this returns flows, [[app, env]] returns none."""
+    assert _normalise_filter([HREF, ENV_HREF]) == [HREF, ENV_HREF]
+
+
+def test_empty_filter_is_the_one_case_we_wrap():
+    """[] yields no flows at all; [[]] means match anything."""
+    assert _normalise_filter(None) == [[]]
+    assert _normalise_filter([]) == [[]]
+
+
+def test_a_single_string_is_accepted():
+    assert _normalise_filter(HREF) == [HREF]
+
+
+# ---------------------------------------------------------------------------
+# Which host runs the process. process_name comes from whichever VEN reported
+# the flow, so direction decides the side. Verified on a live PCE:
+# chrome.exe/mstsc.exe/putty.exe are outbound, httpd/sshd are inbound.
+# ---------------------------------------------------------------------------
+
+def test_inbound_process_is_attributed_to_the_destination():
+    """httpd reported on an inbound flow runs on the web server, not on the
+    endpoint that connected to it. Getting this backwards puts a server daemon
+    on someone's laptop."""
+    flows = [_flow(service={"port": 443, "proto": 6, "process_name": "httpd"},
+                   flow_direction="inbound")]
+    summary = summarize_traffic_structured(raw_flows_to_dataframe(FakePCE(LABELS), flows))
+    assert summary["by_process"][0]["destinations"][0]["process_runs_on"] == "destination"
+
+
+def test_outbound_process_is_attributed_to_the_source():
+    flows = [_flow(service={"port": 443, "proto": 6, "process_name": "chrome.exe"},
+                   flow_direction="outbound")]
+    summary = summarize_traffic_structured(raw_flows_to_dataframe(FakePCE(LABELS), flows))
+    assert summary["by_process"][0]["destinations"][0]["process_runs_on"] == "source"
+
+
+def test_direction_splits_the_same_process_name():
+    """httpd inbound and httpd outbound are different facts and must not merge."""
+    flows = [_flow(service={"port": 443, "proto": 6, "process_name": "httpd"},
+                   flow_direction="inbound", dst={"ip": "1.1.1.1"}),
+             _flow(service={"port": 443, "proto": 6, "process_name": "httpd"},
+                   flow_direction="outbound", dst={"ip": "1.1.1.1"})]
+    summary = summarize_traffic_structured(raw_flows_to_dataframe(FakePCE(LABELS), flows))
+    sides = {d["process_runs_on"] for d in summary["by_process"][0]["destinations"]}
+    assert sides == {"source", "destination"}
+
+
+# ---------------------------------------------------------------------------
+# Contract tests: does the SDK actually ACCEPT what we produce?
+#
+# Everything above asserts the shape our helpers return, which is what my own
+# assumption said was right -- and three of those tests passed while the
+# feature was broken, because they encoded the assumption rather than the
+# contract. TrafficQuery.build validates its input without any network, so the
+# contract is cheap to test directly. These are the tests that would have
+# caught it.
+# ---------------------------------------------------------------------------
+
+import pytest as _pytest
+from illumio import TrafficQuery                      # noqa: E402
+
+LABEL_HREF = "/orgs/1/labels/74"
+ENV_LABEL_HREF = "/orgs/1/labels/126"
+
+
+def _build(sources=None, destinations=None):
+    return TrafficQuery.build(
+        start_date="2026-01-01", end_date="2026-01-02",
+        include_sources=_normalise_filter(sources),
+        include_destinations=_normalise_filter(destinations),
+        exclude_sources=[], exclude_destinations=[],
+        include_services=[], exclude_services=[], policy_decisions=[],
+        max_results=10, query_name="contract-test",
+    )
+
+
+def test_sdk_accepts_a_resolved_label_shorthand():
+    """app=vdi -> href -> TrafficQuery.build must not raise.
+
+    The old code produced {"label": {"href": ...}}; the SDK passes non-str
+    through uncoerced and then rejects it with
+    AttributeError: Invalid value for include.
+    """
+    resolved = _resolve_filter_block(["app=vdi"], {"app=vdi": LABEL_HREF}, [])
+    query = _build(sources=resolved)
+    assert query.sources.include == [[{"label": {"href": LABEL_HREF}}]]
+
+
+def test_sdk_accepts_a_bare_href():
+    assert _build(sources=[LABEL_HREF]).sources.include == [[{"label": {"href": LABEL_HREF}}]]
+
+
+def test_sdk_accepts_a_legacy_nested_href():
+    assert _build(sources=[[LABEL_HREF]]).sources.include == [[{"label": {"href": LABEL_HREF}}]]
+
+
+def test_two_labels_become_two_and_blocks_in_the_sdk():
+    """Two AND-blocks, not one block with two labels. On a live PCE the former
+    returns flows and the latter returns none."""
+    assert _build(sources=[LABEL_HREF, ENV_LABEL_HREF]).sources.include == [
+        [{"label": {"href": LABEL_HREF}}],
+        [{"label": {"href": ENV_LABEL_HREF}}],
+    ]
+
+
+def test_sdk_accepts_an_omitted_filter_as_match_all():
+    assert _build(sources=None).sources.include == [[]]
+
+
+def test_sdk_accepts_an_ip_address():
+    assert _build(sources=["10.0.0.1"]).sources.include == [[{"ip_address": "10.0.0.1"}]]
+
+
+def test_pre_wrapped_dict_is_what_the_sdk_rejects():
+    """Pins the failure mode itself, so nobody reintroduces the dict form
+    thinking it is equivalent."""
+    with _pytest.raises(Exception):
+        TrafficQuery.build(
+            start_date="2026-01-01", end_date="2026-01-02",
+            include_sources=[[LABEL_HREF]],          # nested raw string
+            include_destinations=[[]], exclude_sources=[], exclude_destinations=[],
+            include_services=[], exclude_services=[], policy_decisions=[],
+            max_results=10, query_name="must-raise",
+        )
+
+
+# ---------------------------------------------------------------------------
+# discover-process-egress: only source-side processes, and never a bare zero
+# ---------------------------------------------------------------------------
+
+def test_egress_ignores_inbound_flows():
+    """An inbound flow names the listener on the destination. Counting it as
+    egress puts a web server's httpd on the endpoint that called it."""
+    from illumio_mcp.tools.traffic import _is_external
+    df = raw_flows_to_dataframe(FakePCE(LABELS), [
+        _flow(dst={"ip": "1.2.3.4"}, flow_direction="inbound",
+              service={"port": 443, "proto": 6, "process_name": "httpd"}),
+        _flow(dst={"ip": "5.6.7.8"}, flow_direction="outbound",
+              service={"port": 443, "proto": 6, "process_name": "claude.exe"}),
+    ])
+    outbound = df[df["flow_direction"] != "inbound"]
+    external = outbound[outbound.apply(_is_external, axis=1)]
+    assert set(external["process_name"]) == {"claude.exe"}
+
+
+def test_egress_excludes_managed_destinations():
+    """A destination with a workload is internal, however exotic its IP."""
+    from illumio_mcp.tools.traffic import _is_external
+    df = raw_flows_to_dataframe(FakePCE(LABELS), [
+        _flow(dst={"ip": "8.8.8.8", "workload": {"hostname": "db01"}}),
+        _flow(dst={"ip": "8.8.4.4"}),
+    ])
+    assert int(df.apply(_is_external, axis=1).sum()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Ringfence remote-app extraction
+# ---------------------------------------------------------------------------
+
+def test_ringfence_grouping_keeps_unlabelled_sources():
+    """src_app/src_env are null for every unlabelled source. pandas drops those
+    rows by default, which is how a ringfence reported zero remote apps while
+    the summary showed hundreds of thousands of connections."""
+    import pandas as _pd
+    from illumio_mcp.tools.ringfence import _group_keeping_blanks
+    frame = _pd.DataFrame([
+        {"src_app": "vdi", "src_env": "prod", "port": 443, "proto": 6, "num_connections": 5},
+        {"src_app": None, "src_env": None, "port": 443, "proto": 6, "num_connections": 7},
+    ])
+    grouped = _group_keeping_blanks(frame, ["src_app", "src_env", "port", "proto"])
+    assert len(grouped) == 2
+    assert grouped["num_connections"].sum() == 12
+
+
+def test_ringfence_does_not_combine_app_and_env_into_one_block():
+    """[[app, env]] returns no flows on a live PCE; [[app], [env]] returns 278.
+    A source guard, because the difference only shows against a real PCE."""
+    import pathlib
+    for name in ("ringfence.py", "policy.py"):
+        src = (pathlib.Path("src/illumio_mcp/tools") / name).read_text()
+        assert "[[app_filter, env_filter]]" not in src, f"{name} rebuilt the broken filter"

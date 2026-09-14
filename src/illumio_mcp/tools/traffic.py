@@ -85,7 +85,13 @@ def _resolve_filter_block(block, lookup: dict, unresolved: list):
     if isinstance(block, str) and "=" in block and not block.startswith("/"):
         href = lookup.get(block.strip())
         if href:
-            return {"label": {"href": href}}
+            # Return the bare HREF string, not a wrapped dict. The SDK's
+            # _parse_traffic_filters coerces strings itself -- href -> label
+            # ref, FQDN -> fqdn, dotted quad -> ip_address -- and wraps each
+            # into its own AND-block. Anything that is not a str it passes
+            # through untouched, so a dict or a nested list skips coercion
+            # and then fails validation with "Invalid value for include".
+            return href
         unresolved.append(block)
         return block
     return block
@@ -145,16 +151,31 @@ def _unresolved_error(unresolved: list, pce) -> dict | None:
 
 
 def _normalise_filter(value):
-    """Explorer expects a list of OR-blocks, each a list of AND-conditions.
+    """Shape a filter argument for TrafficQuery.build.
 
-    An omitted filter must be [[]] ("match anything"), not []. A caller passing
-    a flat list like ["app=vdi"] means one block, so wrap it.
+    The SDK wants a FLAT list of strings and does the block-wrapping itself
+    (illumio.explorer.trafficanalysis._parse_traffic_filters): each string
+    becomes its own AND-block, so ["<app href>", "<env href>"] means
+    "app AND env" -- verified on a live PCE, 274 flows.
+
+    Wrapping it ourselves is what broke this: [["<href>"]] makes the SDK see a
+    list rather than a string, skip coercion, and fail validation with
+    "Invalid value for include". An empty filter is the one case that does need
+    explicit wrapping -- [] yields no flows at all, [[]] means "match
+    anything".
     """
     if not value:
         return [[]]
-    if isinstance(value, list) and value and not isinstance(value[0], list):
+    if isinstance(value, str):
         return [value]
-    return value
+    if isinstance(value, list) and any(isinstance(v, list) for v in value):
+        # Already block-shaped (or mixed). Flatten one level so the SDK can
+        # coerce the strings inside.
+        flat = []
+        for item in value:
+            flat.extend(item if isinstance(item, list) else [item])
+        return flat or [[]]
+    return list(value)
 
 
 # ---------------------------------------------------------------------------
@@ -501,14 +522,23 @@ def summarize_traffic_structured(df: pd.DataFrame, *, limit: int = 25) -> dict:
     if 'process_name' in df.columns:
         procs = df[~df['process_name'].isin([NA, ''])]
         if not procs.empty:
-            grouped = (procs.groupby(['process_name', 'dst_label', 'port', 'proto',
-                                      'policy_decision'], dropna=False)['num_connections']
+            keys = ['process_name', 'dst_label', 'port', 'proto', 'policy_decision']
+            if 'flow_direction' in procs.columns:
+                keys.append('flow_direction')
+            grouped = (procs.groupby(keys, dropna=False)['num_connections']
                        .sum().reset_index())
             by_process = []
             for name, chunk in grouped.groupby('process_name'):
                 dests = [
                     {"to": r.dst_label, "port": _int(r.port), "proto": _proto(r.proto),
-                     "policy": r.policy_decision, "connections": int(r.num_connections)}
+                     "policy": r.policy_decision, "connections": int(r.num_connections),
+                     # Which host actually runs this binary. process_name comes
+                     # from whichever VEN reported the flow, so an inbound flow
+                     # names the listener on the destination -- httpd on a web
+                     # server, not on the endpoint that called it.
+                     "process_runs_on": ("destination"
+                                         if getattr(r, 'flow_direction', None) == 'inbound'
+                                         else "source")}
                     for r in _top(chunk, limit=10).itertuples()
                 ]
                 users = sorted({u for u in procs.loc[procs['process_name'] == name,
@@ -1035,7 +1065,17 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
                 "pce_flows": len(raw),
             }))]
 
-        external = df[df.apply(_is_external, axis=1)]
+        # Only outbound flows. process_name describes the process on whichever
+        # VEN reported the flow: outbound means the client on the source,
+        # inbound means the listener on the destination. Verified on a live
+        # PCE -- chrome.exe/mstsc.exe/putty.exe are outbound, httpd/sshd are
+        # inbound. Without this filter a web server's httpd shows up as if it
+        # were running on the endpoint that connected to it.
+        source_side = df
+        if 'flow_direction' in df.columns and not arguments.get('include_inbound', False):
+            source_side = df[df['flow_direction'] != 'inbound']
+
+        external = source_side[source_side.apply(_is_external, axis=1)]
         wanted = arguments.get('process')
         if wanted:
             needles = [wanted] if isinstance(wanted, str) else list(wanted)
@@ -1051,14 +1091,22 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({
                 "message": "No egress flows matched",
                 "window": {"start": arguments['start_date'], "end": arguments['end_date']},
-                "pce_flows": len(raw),
-                "hint": ("The PCE only reports process names for flows seen by a VEN with "
-                         "process visibility enabled. Set only_named_processes=false to "
-                         "include flows with no process attribution."),
+                "examined": {
+                    "pce_flows": len(raw),
+                    "rows": int(len(df)),
+                    "outbound_rows": int(len(source_side)),
+                    "with_external_destination": int(len(external)),
+                },
+                "hint": ("Every destination in this window is a workload this PCE manages, "
+                         "so there is no egress to report. A zero here is a finding, not an "
+                         "error. Process names also require a VEN with process visibility; "
+                         "set only_named_processes=false to include unattributed flows, or "
+                         "include_inbound=true to also count destination-side processes."),
             }))]
 
         grouped, _, _ = group_flows(external, ["process", "user", "destination",
-                                               "port", "proto", "policy", "rule"])
+                                               "port", "proto", "policy", "rule",
+                                               "direction"])
         grouped = grouped.sort_values('num_connections', ascending=False)
 
         limit = int(arguments.get('limit', 50))
@@ -1076,6 +1124,9 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
                 "policy_decision": row.get('policy_decision'),
                 "permitted_today": allowed,
                 "connections": int(row.get('num_connections') or 0),
+                "process_runs_on": ("destination"
+                                    if row.get('flow_direction') == 'inbound'
+                                    else "source"),
             }
             if row.get('matched_rules') not in (None, NA, ''):
                 finding["matched_rule"] = row['matched_rules']
