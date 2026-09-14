@@ -13,6 +13,22 @@ from ..log_scrub import ScrubbedArgs
 logger = logging.getLogger('illumio_mcp')
 
 
+def _group_keeping_blanks(df, group_cols):
+    """Group and sum connections without silently dropping rows.
+
+    pandas' groupby drops any row with a NaN in a group key. Here the keys
+    include src_app/src_env, which are null for every unlabelled source, so the
+    default behaviour discards exactly the traffic a ringfence needs to see --
+    and reports an empty result rather than an error.
+    """
+    frame = df.copy()
+    for col in group_cols:
+        if col in frame.columns:
+            frame[col] = frame[col].fillna("")
+    return frame.groupby(group_cols, dropna=False)['num_connections'].sum().reset_index()
+
+
+
 def handle_create_ringfence(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE RINGFENCE CALLED")
@@ -87,7 +103,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             end_date=end_date,
             include_sources=[[]],
             exclude_sources=[],
-            include_destinations=[[app_filter, env_filter]],
+            include_destinations=[[app_filter], [env_filter]],
             exclude_destinations=[],
             include_services=[],
             exclude_services=[],
@@ -107,7 +123,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         traffic_query_out = TrafficQuery.build(
             start_date=start_date,
             end_date=end_date,
-            include_sources=[[app_filter, env_filter]],
+            include_sources=[[app_filter], [env_filter]],
             exclude_sources=[],
             include_destinations=[[]],
             exclude_destinations=[],
@@ -145,7 +161,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
                 if 'policy_decision' in inbound_df.columns:
                     group_cols.append('policy_decision')
                 group_cols = [c for c in group_cols if c in inbound_df.columns]
-                inbound_grouped = inbound_df.groupby(group_cols)['num_connections'].sum().reset_index()
+                inbound_grouped = _group_keeping_blanks(inbound_df, group_cols)
                 for _, row in inbound_grouped.iterrows():
                     src_app_val = row.get('src_app')
                     src_env_val = row.get('src_env')
@@ -176,7 +192,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             if dst_group_cols and 'port' in outbound_df.columns and 'proto' in outbound_df.columns:
                 group_cols = dst_group_cols + ['port', 'proto']
                 group_cols = [c for c in group_cols if c in outbound_df.columns]
-                outbound_grouped = outbound_df.groupby(group_cols)['num_connections'].sum().reset_index()
+                outbound_grouped = _group_keeping_blanks(outbound_df, group_cols)
                 for _, row in outbound_grouped.iterrows():
                     dst_app_val = row.get('dst_app')
                     dst_env_val = row.get('dst_env')
