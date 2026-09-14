@@ -1,14 +1,16 @@
 import json
 import logging
-from datetime import datetime, timedelta
 from collections import defaultdict, deque
+from datetime import datetime, timedelta
+
 import mcp.types as types
 from illumio import TrafficQuery, RuleSet, LabelSet, Rule, AMS, ServicePort
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
-from .traffic import to_dataframe
-from .constants import MCP_BUG_MAX_RESULTS
+
 from ..log_scrub import ScrubbedArgs
+from .traffic import to_dataframe, to_query_start, to_query_end
+from .constants import MCP_BUG_MAX_RESULTS
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -91,8 +93,8 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
                     deny_consumer = "ams"
 
         # Step 3: Query traffic flows for this app+env (as destination = inbound)
-        start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = to_query_start((datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d'))
+        end_date = to_query_end(datetime.now().strftime('%Y-%m-%d'))
 
         # Build TrafficQueryFilter objects for the app+env labels
         app_filter = TrafficQueryFilter(label=Reference(href=app_label.href))
@@ -103,7 +105,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             end_date=end_date,
             include_sources=[[]],
             exclude_sources=[],
-            include_destinations=[[app_filter], [env_filter]],
+            include_destinations=[[app_filter, env_filter]],
             exclude_destinations=[],
             include_services=[],
             exclude_services=[],
@@ -123,7 +125,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         traffic_query_out = TrafficQuery.build(
             start_date=start_date,
             end_date=end_date,
-            include_sources=[[app_filter], [env_filter]],
+            include_sources=[[app_filter, env_filter]],
             exclude_sources=[],
             include_destinations=[[]],
             exclude_destinations=[],
@@ -624,8 +626,8 @@ def handle_identify_infrastructure_services(ctx, arguments: dict) -> list:
         start = end - timedelta(days=lookback_days)
 
         traffic_query = TrafficQuery.build(
-            start_date=start.strftime("%Y-%m-%d"),
-            end_date=end.strftime("%Y-%m-%d"),
+            start_date=to_query_start(start.strftime("%Y-%m-%d")),
+            end_date=to_query_end(end.strftime("%Y-%m-%d")),
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=100000
         )
@@ -882,8 +884,8 @@ def handle_detect_lateral_movement_paths(ctx, arguments: dict) -> list:
         start_app = arguments.get("app_name")
         start_env = arguments.get("env_name")
 
-        start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = to_query_start((datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d'))
+        end_date = to_query_end(datetime.now().strftime('%Y-%m-%d'))
 
         traffic_query = TrafficQuery.build(
             start_date=start_date,

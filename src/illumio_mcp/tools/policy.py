@@ -1,14 +1,16 @@
 import json
 import logging
 from datetime import datetime, timedelta
+
 import pandas as pd
 import mcp.types as types
 from illumio import TrafficQuery
 from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
-from .traffic import to_dataframe
-from .constants import MCP_BUG_MAX_RESULTS
+
 from ..log_scrub import ScrubbedArgs
+from .traffic import to_dataframe, to_query_start, to_query_end
+from .constants import MCP_BUG_MAX_RESULTS
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -24,7 +26,7 @@ def _label_filter(hrefs) -> str:
     reads like a Python set and sends you looking in the wrong place. Verified
     against a live PCE: flat -> 406, [[a, b]] -> 0 workloads, [[a], [b]] -> 33.
     """
-    return json.dumps([[href] for href in hrefs])
+    return json.dumps([list(hrefs)]) if hrefs else json.dumps([])
 
 
 
@@ -165,8 +167,8 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
                 vis_only_workloads.append(w.name or w.hostname or w.href)
 
         # Query traffic
-        start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = to_query_start((datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d'))
+        end_date = to_query_end(datetime.now().strftime('%Y-%m-%d'))
 
         query_kwargs = {
             "start_date": start_date,
@@ -383,8 +385,8 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
             enforcement_modes[mode] = enforcement_modes.get(mode, 0) + 1
 
         # Query traffic flows
-        start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = to_query_start((datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d'))
+        end_date = to_query_end(datetime.now().strftime('%Y-%m-%d'))
 
         app_filter = TrafficQueryFilter(label=Reference(href=app_label.href))
         env_filter = TrafficQueryFilter(label=Reference(href=env_label.href))
@@ -394,7 +396,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
             start_date=start_date,
             end_date=end_date,
             include_sources=[[]],
-            include_destinations=[[app_filter], [env_filter]],
+            include_destinations=[[app_filter, env_filter]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,
             query_name='readiness-inbound'
@@ -405,7 +407,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
         traffic_query_out = TrafficQuery.build(
             start_date=start_date,
             end_date=end_date,
-            include_sources=[[app_filter], [env_filter]],
+            include_sources=[[app_filter, env_filter]],
             include_destinations=[[]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,
@@ -554,8 +556,8 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
             return [types.TextContent(type="text", text=json.dumps({"error": f"Env label '{env_name}' not found"}))]
         env_label = env_labels[0]
 
-        start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = to_query_start((datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d'))
+        end_date = to_query_end(datetime.now().strftime('%Y-%m-%d'))
 
         app_filter = TrafficQueryFilter(label=Reference(href=app_label.href))
         env_filter = TrafficQueryFilter(label=Reference(href=env_label.href))
@@ -565,7 +567,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
             start_date=start_date,
             end_date=end_date,
             include_sources=[[]],
-            include_destinations=[[app_filter], [env_filter]],
+            include_destinations=[[app_filter, env_filter]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,
             query_name='coverage-inbound'
@@ -576,7 +578,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
         traffic_query_out = TrafficQuery.build(
             start_date=start_date,
             end_date=end_date,
-            include_sources=[[app_filter], [env_filter]],
+            include_sources=[[app_filter, env_filter]],
             include_destinations=[[]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
             max_results=MCP_BUG_MAX_RESULTS,

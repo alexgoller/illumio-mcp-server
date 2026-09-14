@@ -6,6 +6,7 @@ that logged `json.dumps(arguments)` directly bypassed that control -- which
 leaked confirm tokens for the two `requires_confirm` tools, since the token
 travels in `arguments["_meta"]["confirm_token"]`.
 """
+
 from __future__ import annotations
 
 import json
