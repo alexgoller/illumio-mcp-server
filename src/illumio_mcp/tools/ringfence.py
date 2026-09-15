@@ -10,7 +10,21 @@ from illumio.util.jsonutils import Reference
 
 from ..log_scrub import ScrubbedArgs
 from .traffic import to_dataframe, to_query_start, to_query_end
-from .constants import MCP_BUG_MAX_RESULTS
+from ..label_refs import normalise_label_value
+
+# MCP_BUG_MAX_RESULTS (tools/constants.py) bounds how many rows we hand back
+# to the client. Ringfence discovery hands back no flows at all -- it collapses
+# them into a list of remote app+env pairs -- so applying that cap to the QUERY
+# truncated the thing being discovered. A busy app's first 500 flows can be
+# entirely one chatty neighbour, and every other remote app then never reaches
+# the generated ruleset, which still looks complete. The other ringfence
+# queries in this module already pull 100000 for the same reason.
+#
+# Not implicated in the missing-`payment` report: demo100 returns 233 inbound
+# and 304 outbound flows for that app, well under the old cap. This is a
+# robustness fix for busier estates, and `flows_analysed` is now reported so
+# the question is answerable from the output rather than by re-deriving it.
+RINGFENCE_DISCOVERY_MAX_RESULTS = 100000
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -40,8 +54,9 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
     try:
         pce = ctx.pce
 
-        app_name = arguments["app_name"]
-        env_name = arguments["env_name"]
+        # Accept app=ordering and label HREFs, not just the bare value.
+        app_name = normalise_label_value(pce, arguments["app_name"], "app")
+        env_name = normalise_label_value(pce, arguments["env_name"], "env")
         lookback_days = arguments.get("lookback_days", 30)
         dry_run = arguments.get("dry_run", False)
         selective = arguments.get("selective", False)
@@ -111,7 +126,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             exclude_services=[],
             policy_decisions=[],
             exclude_workloads_from_ip_list_query=True,
-            max_results=MCP_BUG_MAX_RESULTS,
+            max_results=RINGFENCE_DISCOVERY_MAX_RESULTS,
             query_name='ringfence-inbound'
         )
 
@@ -133,7 +148,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             exclude_services=[],
             policy_decisions=[],
             exclude_workloads_from_ip_list_query=True,
-            max_results=MCP_BUG_MAX_RESULTS,
+            max_results=RINGFENCE_DISCOVERY_MAX_RESULTS,
             query_name='ringfence-outbound'
         )
 
@@ -142,6 +157,14 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             query_name='ringfence-outbound',
             traffic_query=traffic_query_out
         )
+
+        # If discovery still saturated, the remote-app list is incomplete and
+        # the resulting ruleset will quietly omit apps. Surface it.
+        discovery_truncated = [
+            name for name, flows in (("inbound", inbound_flows),
+                                     ("outbound", outbound_flows))
+            if len(flows) >= RINGFENCE_DISCOVERY_MAX_RESULTS
+        ]
 
         # Step 5: Convert flows to dataframes and group by app+env
         inbound_df = to_dataframe(pce, inbound_flows)
@@ -243,6 +266,8 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             "env_label_href": env_label.href,
             "lookback_days": lookback_days,
             "skip_allowed": skip_allowed,
+            "flows_analysed": {"inbound": len(inbound_flows),
+                               "outbound": len(outbound_flows)},
             "policy_coverage": {
                 "already_allowed": already_allowed_count,
                 "newly_allowed": newly_allowed_count,
@@ -271,6 +296,16 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         summary["selective"] = selective
         if selective:
             summary["deny_consumer"] = deny_consumer
+
+        if discovery_truncated:
+            summary["discovery_truncated"] = discovery_truncated
+            summary["discovery_warning"] = (
+                f"The {', '.join(discovery_truncated)} query hit the "
+                f"{RINGFENCE_DISCOVERY_MAX_RESULTS}-flow cap, so the remote-app "
+                f"list is incomplete and this ruleset may omit apps that do "
+                f"communicate with {app_name} ({env_name}). Narrow the lookback "
+                f"window and re-run before provisioning."
+            )
 
         if dry_run:
             summary["dry_run"] = True

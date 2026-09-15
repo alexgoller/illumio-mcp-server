@@ -2155,13 +2155,50 @@ Only use this for genuine security incidents. To undo, delete the override deny 
     else:
         raise ValueError(f"Unknown prompt: {name}")
 
+MUTATING_TOOL_NOTE = (
+    " WRITE OPERATION: changes PCE state. In clients that gate tool calls "
+    "(Claude Desktop, Claude Code), this pauses for the user to approve it -- "
+    "the call has not failed and must not be retried while waiting."
+)
+
+CONFIRM_TOOL_NOTE = (
+    " Additionally requires an explicit confirm token, so it takes two steps: "
+    "the first call returns a token to be passed back in the second."
+)
+
+
+def _annotate_mutating(tools: list[types.Tool]) -> list[types.Tool]:
+    """Append the approval warning to every tool the registry marks mutating.
+
+    Derived from TOOL_REGISTRY rather than written into each description by
+    hand: the registry already knows which tools mutate, and a second hand-kept
+    list of write tools is a third place to forget -- which is exactly how the
+    advertised tool list once drifted from the registry.
+
+    The note exists because an approval prompt is invisible to the model. A
+    gated call just stops producing output, which reads as a hung server, and
+    the reflex is to retry -- queueing a second approval for a PCE write.
+    """
+    annotated = []
+    for tool in tools:
+        spec = TOOL_REGISTRY.get(tool.name)
+        if spec is None or not getattr(spec, "mutating", False):
+            annotated.append(tool)
+            continue
+        description = (tool.description or "") + MUTATING_TOOL_NOTE
+        if getattr(spec, "requires_confirm", False):
+            description += CONFIRM_TOOL_NOTE
+        annotated.append(tool.model_copy(update={"description": description}))
+    return annotated
+
+
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
     """
     List available tools.
     Each tool specifies its arguments using JSON Schema validation.
     """
-    return [
+    return _annotate_mutating([
         types.Tool(
             name="get-workloads",
             description="Get workloads from the PCE. Use detail_level to control breadth vs depth: 'compact' (default) for tabular overviews of thousands of workloads, 'full' for complete data on specific workloads, 'labels_only' for maximum breadth with just identity and labels.",
@@ -3346,7 +3383,7 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                 "properties": {},
             }
         ),
-    ]
+    ])
 
 # Sensitive-argument redaction lives in log_scrub so tool handlers can use it
 # too; these aliases keep the existing import surface stable.

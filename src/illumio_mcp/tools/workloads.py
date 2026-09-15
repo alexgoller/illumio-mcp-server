@@ -1,8 +1,11 @@
 import json
 import logging
+
 import pandas as pd
 import mcp.types as types
 from illumio import Label, Workload, Interface
+
+from ..label_refs import resolve_label_refs, encode_label_filter
 from .constants import MCP_MAX_RESPONSE_BYTES
 from ..log_scrub import ScrubbedArgs
 
@@ -164,9 +167,25 @@ def handle_get_workloads(ctx, arguments: dict) -> list:
         detail_level = arguments.get('detail_level', 'compact')
 
         params = {"include": "labels", "max_results": arguments.get('max_results', 10000)}
-        for param in ['name', 'hostname', 'ip_address', 'description', 'labels', 'enforcement_mode']:
+        for param in ['name', 'hostname', 'ip_address', 'description', 'enforcement_mode']:
             if arguments.get(param):
                 params[param] = arguments[param]
+
+        # Label filters need encoding. Passing the raw list straight into the
+        # query string makes the PCE answer
+        #     406 invalid_uri: Invalid URI: {/orgs/.../labels/...}
+        # The braces are the PCE echoing the un-encoded Python list, not a set.
+        # Accepts HREFs and key=value alike, so this tool matches the traffic
+        # tools instead of demanding HREFs.
+        if arguments.get('labels'):
+            hrefs, unknown = resolve_label_refs(pce, arguments['labels'])
+            if unknown:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "error": "unresolved_label_filter",
+                    "unresolved": unknown,
+                    "message": "Use key=value with an existing label, or a label HREF.",
+                }))]
+            params['labels'] = encode_label_filter(hrefs)
         if 'managed' in arguments:
             params['managed'] = arguments['managed']
         if 'online' in arguments:
