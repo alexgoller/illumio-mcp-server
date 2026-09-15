@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 from datetime import datetime, timedelta
@@ -95,6 +96,75 @@ def _iso(value, suffix: str) -> str:
     text = str(value).strip()
     if len(text) == 10 and text.count("-") == 2:
         return text + suffix
+    return text
+
+
+
+# ---------------------------------------------------------------------------
+# Destination attribution
+# ---------------------------------------------------------------------------
+
+# Published ranges for the AI providers people actually care about finding.
+# The PCE only resolves an FQDN when it has DNS visibility for the flow, and
+# for endpoint egress it usually does not -- so without this a shadow-AI report
+# is a list of IPs, which answers nothing. Ranges are coarse on purpose:
+# "this went to Anthropic" is the useful claim, not which edge node.
+AI_PROVIDER_RANGES = [
+    # Vendor-owned ranges: a hit here names the vendor.
+    ("anthropic", "likely", ["160.79.104.0/23"]),
+    ("openai",    "likely", ["23.102.140.112/28", "13.66.11.96/28",
+                             "104.210.133.240/28"]),
+
+    # Shared infrastructure. A hit narrows the field but does NOT identify a
+    # vendor: Anthropic and OpenAI both front on Cloudflare, and 20.0.0.0/8 is
+    # the whole of Azure, not just Azure OpenAI. Reporting these as a vendor
+    # would tag every Azure-hosted business app as shadow AI, so they are
+    # named for what they actually prove and flagged ambiguous.
+    ("cloudflare-fronted", "ambiguous", ["172.64.0.0/13", "162.158.0.0/15",
+                                         "162.159.0.0/16", "104.16.0.0/13",
+                                         "104.24.0.0/14"]),
+    ("azure-hosted",  "ambiguous", ["20.0.0.0/8"]),
+    ("google-hosted", "ambiguous", ["142.250.0.0/15", "172.217.0.0/16",
+                                    "216.58.192.0/19"]),
+]
+
+
+def classify_destination(ip):
+    """Best-effort provider for a destination IP -> (provider, confidence).
+
+    Confidence is carried per range, not inferred: 'likely' means the range is
+    vendor-owned, 'ambiguous' means it is shared infrastructure that merely
+    narrows the field. Callers should treat only 'likely' as attribution.
+    """
+    if not ip or ip in (NA, ""):
+        return None, None
+    try:
+        addr = ipaddress.ip_address(str(ip))
+    except ValueError:
+        return None, None
+    for provider, confidence, cidrs in AI_PROVIDER_RANGES:
+        for cidr in cidrs:
+            try:
+                if addr in ipaddress.ip_network(cidr):
+                    return provider, confidence
+            except ValueError:
+                continue
+    return None, None
+
+
+def process_basename(name):
+    """Last path component of a process name.
+
+    The PCE reports the full path, so the same binary under eight user
+    profiles looks like eight distinct processes -- 20 where the answer is
+    'Claude.exe and ChatGPT.exe'.
+    """
+    if not name or name in (NA, ""):
+        return name
+    text = str(name)
+    for sep in ("\\", "/"):
+        if sep in text:
+            text = text.rsplit(sep, 1)[-1]
     return text
 
 
@@ -215,7 +285,7 @@ def _normalise_filter(value):
     return [items]
 
 
-def fetch_flows_raw(pce, traffic_query, query_name: str) -> list:
+def fetch_flows_raw(pce, traffic_query, query_name: str, meta: dict | None = None) -> list:
     """Run an async Explorer query and return the raw JSON flow dicts.
 
     Mirrors PolicyComputeEngine.get_traffic_flows_async, but stops before
@@ -235,10 +305,33 @@ def fetch_flows_raw(pce, traffic_query, query_name: str) -> list:
         include_org=True,
     )
     response.raise_for_status()
-    collection_href = pce._async_poll(response.json()['href'])
+    query_href = response.json()['href']
+    collection_href = pce._async_poll(query_href)
     collection = pce.get(collection_href)
     collection.raise_for_status()
-    return collection.json()
+    flows = collection.json()
+
+    # Record what the PCE says about the query so callers can tell a complete
+    # answer from a truncated sample -- "500 flows" otherwise reads the same
+    # whether the real answer is 501 or 4,000,000.
+    #
+    # NOTE on units, measured against a live PCE: matches_count counts raw
+    # observations BEFORE Explorer aggregates identical src/dst/port/proto
+    # tuples into the rows it returns, so it is consistently larger than the
+    # row count and the ratio is not fixed (5525 rows <- 9021 matches in one
+    # 30-day window). It is therefore NOT the number of rows a bigger
+    # max_results would yield, and must not be presented as one.
+    if meta is not None:
+        meta['returned'] = len(flows)
+        try:
+            status = pce.get(query_href)
+            status.raise_for_status()
+            body = status.json()
+            if isinstance(body.get('matches_count'), int):
+                meta['raw_observations'] = body['matches_count']
+        except Exception as e:  # status is a nicety; never fail the query for it
+            logger.debug("could not read async query status: %s", e)
+    return flows
 
 def to_dataframe(pce, flows):
 
@@ -899,14 +992,29 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
             query_name=arguments.get('query_name', 'mcp-traffic-summary')
         )
 
+        fetch_meta: dict = {}
         all_traffic = fetch_flows_raw(
-            pce, query, arguments.get('query_name', 'mcp-traffic-summary'))
+            pce, query, arguments.get('query_name', 'mcp-traffic-summary'),
+            meta=fetch_meta)
 
         df = raw_flows_to_dataframe(pce, all_traffic)
         summary = summarize_traffic_structured(df)
         summary['window'] = {'start': arguments['start_date'], 'end': arguments['end_date']}
         summary['totals']['pce_flows'] = len(all_traffic)
         summary['totals']['truncated_at'] = max_results
+        # Saturation is the only reliable truncation signal: if the PCE returned
+        # exactly the cap, there are almost certainly more rows behind it.
+        truncated = len(all_traffic) >= max_results
+        summary['totals']['truncated'] = truncated
+        if isinstance(fetch_meta.get('raw_observations'), int):
+            summary['totals']['raw_observations'] = fetch_meta['raw_observations']
+        if truncated:
+            summary['totals']['coverage_note'] = (
+                f"Hit the {max_results}-row cap, so this is a partial view and "
+                f"the counts below are lower bounds. Narrow the window or add "
+                f"label filters for a complete answer, or raise max_results "
+                f"(server ceiling {MCP_BUG_MAX_RESULTS})."
+            )
         if unresolved:
             summary['unresolved_filters'] = unresolved
             summary['unresolved_hint'] = (
@@ -1091,6 +1199,18 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
 
         max_results = min(int(arguments.get('max_results', MCP_BUG_MAX_RESULTS)),
                           MCP_BUG_MAX_RESULTS)
+
+        # Push the process filter into the Explorer query rather than applying
+        # it after the pull. Client-side filtering runs AFTER the max_results
+        # cap, so on a busy PCE the processes you asked for may not be inside
+        # the first 500 flows at all. The API substring-matches the full path,
+        # so "Claude.exe" matches C:\...\AnthropicClaude\Claude.exe.
+        wanted = arguments.get('process')
+        service_filter = list(arguments.get('include_services') or [])
+        if wanted and not service_filter:
+            names = [wanted] if isinstance(wanted, str) else list(wanted)
+            service_filter = [{"process_name": n} for n in names if n]
+
         query = TrafficQuery.build(
             start_date=arguments['start_date'],
             end_date=arguments['end_date'],
@@ -1098,7 +1218,7 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
             exclude_sources=arguments.get('exclude_sources', []),
             include_destinations=_normalise_filter(arguments.get('include_destinations')),
             exclude_destinations=arguments.get('exclude_destinations', []),
-            include_services=arguments.get('include_services', []),
+            include_services=service_filter,
             exclude_services=arguments.get('exclude_services', []),
             policy_decisions=arguments.get('policy_decisions', []),
             exclude_workloads_from_ip_list_query=False,   # egress lives in IP lists
@@ -1125,7 +1245,8 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
             source_side = df[df['flow_direction'] != 'inbound']
 
         external = source_side[source_side.apply(_is_external, axis=1)]
-        wanted = arguments.get('process')
+        # Second pass, client-side. The server filter already narrowed the
+        # pull; this only tightens the match (the API is substring-based).
         if wanted:
             needles = [wanted] if isinstance(wanted, str) else list(wanted)
             mask = external['process_name'].fillna('').str.lower().apply(
@@ -1153,19 +1274,24 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
                          "include_inbound=true to also count destination-side processes."),
             }))]
 
-        grouped, _, _ = group_flows(external, ["process", "user", "destination",
+        # Group on the basename, not the full path. The PCE reports
+        # C:\Users\<name>\...\Claude.exe, so eight users running one binary
+        # become eight rows that look identical once rendered.
+        external = external.copy()
+        external['process_name'] = external['process_name'].map(process_basename)
+        grouped, _, _ = group_flows(external, ["process", "destination",
                                                "port", "proto", "policy", "rule",
                                                "direction"])
         grouped = grouped.sort_values('num_connections', ascending=False)
 
         limit = int(arguments.get('limit', 50))
-        findings, by_process = [], {}
+        findings, by_process, providers_seen = [], {}, {}
         for row in grouped.head(limit).to_dict('records'):
             target = _endpoint_label(row, 'dst')
             allowed = row.get('policy_decision') == 'allowed'
+            provider, confidence = classify_destination(row.get('dst_ip'))
             finding = {
                 "process": row.get('process_name'),
-                "user": row.get('user_name') if row.get('user_name') != NA else None,
                 "destination": target,
                 "resolved_by_name": bool(row.get('dst_fqdn') not in (None, NA, '')),
                 "port": _int(row.get('port')),
@@ -1177,10 +1303,15 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
                                     if row.get('flow_direction') == 'inbound'
                                     else "source"),
             }
+            if provider:
+                finding["likely_provider"] = provider
+                finding["provider_confidence"] = confidence
             if row.get('matched_rules') not in (None, NA, ''):
                 finding["matched_rule"] = row['matched_rules']
             findings.append(finding)
             by_process.setdefault(finding["process"], set()).add(target)
+            if provider:
+                providers_seen.setdefault(provider, set()).add(finding["process"])
 
         return [types.TextContent(type="text", text=json.dumps({
             "window": {"start": arguments['start_date'], "end": arguments['end_date']},
@@ -1189,12 +1320,28 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
                 "egress_rows": int(len(external)),
                 "distinct_processes": len(by_process),
                 "returned": len(findings),
-                "truncated": len(grouped) > limit,
+                # Two unrelated kinds of incompleteness that a single
+                # `truncated` flag used to conflate. findings_truncated means
+                # the report was trimmed for size and the rest is one more call
+                # away; flows_truncated means the PCE never gave us the whole
+                # picture, so even the counts shown are lower bounds. Only the
+                # second is a reason to distrust the answer.
+                "findings_truncated": len(grouped) > limit,
+                "flows_truncated": len(raw) >= max_results,
             },
+            **({"coverage_note": (
+                f"Hit the {max_results}-flow cap, so processes or destinations "
+                f"below this one in volume may be missing entirely. Narrow the "
+                f"lookback window, or pass `process` to filter server-side."
+            )} if len(raw) >= max_results else {}),
             "processes": [
                 {"process": name, "external_destinations": sorted(dests)[:20]}
                 for name, dests in sorted(by_process.items(),
                                           key=lambda kv: -len(kv[1]))
+            ],
+            "providers": [
+                {"provider": name, "processes": sorted(procs)}
+                for name, procs in sorted(providers_seen.items())
             ],
             "findings": findings,
             "note": ("Egress means the destination is not a workload managed by this PCE. "

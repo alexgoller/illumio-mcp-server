@@ -85,6 +85,21 @@ working credentials.
 """
 
 
+def _doc_description(tool) -> str:
+    """Tool description with the runtime approval note stripped.
+
+    tools/list appends a write-operation warning so an MCP client's approval
+    pause is not mistaken for a hung server. The docs table already has its own
+    Type column saying `write`, so repeating it here is noise that crowds out
+    the actual description in a truncated cell.
+    """
+    from illumio_mcp.server import MUTATING_TOOL_NOTE, CONFIRM_TOOL_NOTE
+    text = tool.description or ""
+    for note in (CONFIRM_TOOL_NOTE, MUTATING_TOOL_NOTE):
+        text = text.replace(note, "")
+    return text.strip()
+
+
 def _access(spec) -> str:
     return {1: "admin", 2: "operator"}.get(len(spec.roles), "reader")
 
@@ -108,7 +123,7 @@ def render() -> str:
             spec = TOOL_REGISTRY[n]
             kind = ("**confirm**" if spec.requires_confirm
                     else "**write**" if spec.mutating else "*read*")
-            desc = (tools[n].description or "").replace("|", r"\|").strip()
+            desc = _doc_description(tools[n]).replace("|", r"\|").strip()
             if len(desc) > 130:
                 desc = desc[:127].rstrip() + "..."
             out.append(f"| `{n}` | {_access(spec)} | {kind} | {desc} |")
@@ -122,7 +137,7 @@ def render() -> str:
             spec = TOOL_REGISTRY[n]
             kind = ("**confirm**" if spec.requires_confirm
                     else "**write**" if spec.mutating else "*read*")
-            out.append(f"| `{n}` | {_access(spec)} | {kind} | {tools[n].description or ''} |")
+            out.append(f"| `{n}` | {_access(spec)} | {kind} | {_doc_description(tools[n])} |")
 
     out.append(FOOTER)
     return "\n".join(out)
