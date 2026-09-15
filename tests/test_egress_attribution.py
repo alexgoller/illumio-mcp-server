@@ -41,24 +41,37 @@ def test_malformed_input_does_not_raise(junk):
     assert classify_destination(junk) == (None, None)
 
 
-def test_ipv6_does_not_raise():
-    assert classify_destination("2606:4700::1111") == (None, None)
+def test_ipv6_is_attributed_not_just_tolerated():
+    """The hand-written table was v4-only, so IPv6 egress was invisible. The
+    generated table carries Cloudflare's published v6 ranges."""
+    assert classify_destination("2606:4700::1111") == ("cloudflare-fronted", "ambiguous")
 
 
-def test_provider_ranges_are_parseable():
-    """A typo in a CIDR would silently disable that provider's attribution."""
+def test_unknown_ipv6_does_not_raise():
+    assert classify_destination("2001:db8::1") == (None, None)
+
+
+def test_v4_and_v6_are_not_cross_matched():
+    """A v4 address must never match a v6 network or vice versa -- the
+    containment check compares versions before testing membership."""
+    assert classify_destination("2001:db8::1") == (None, None)
+    assert classify_destination("192.0.2.1") == (None, None)
+
+
+def test_provider_ranges_are_compiled_not_strings():
+    """Ranges are compiled to network objects once at import. Re-parsing per
+    flow row would make attribution the slowest part of a 500-row report."""
     import ipaddress
-    for name, _conf, cidrs in AI_PROVIDER_RANGES:
-        assert cidrs, f"{name} has no ranges"
-        for cidr in cidrs:
-            ipaddress.ip_network(cidr)  # raises on a malformed entry
+    for name, _conf, nets in AI_PROVIDER_RANGES:
+        assert nets, f"{name} has no ranges"
+        for net in nets:
+            assert isinstance(net, (ipaddress.IPv4Network, ipaddress.IPv6Network))
 
 
 def test_ranges_do_not_overlap_across_providers():
     """Overlapping ranges make attribution order-dependent."""
     import ipaddress
-    nets = [(name, ipaddress.ip_network(c))
-            for name, _conf, cidrs in AI_PROVIDER_RANGES for c in cidrs]
+    nets = [(name, n) for name, _conf, ns in AI_PROVIDER_RANGES for n in ns]
     for i, (n1, a) in enumerate(nets):
         for n2, b in nets[i + 1:]:
             if n1 != n2:
@@ -101,4 +114,18 @@ def test_shared_infrastructure_is_never_reported_as_a_vendor():
 
 def test_only_vendor_owned_ranges_are_likely():
     assert classify_destination("160.79.104.100")[1] == "likely"
-    assert classify_destination("23.102.140.115")[1] == "likely"
+
+
+def test_azure_hosted_openai_endpoints_are_not_named_as_openai():
+    """RDAP shows 23.102.140.112/28 registered to Microsoft, not OpenAI. It is
+    an Azure-hosted OpenAI endpoint, so other tenants can share that space --
+    naming OpenAI there would manufacture false positives."""
+    provider, confidence = classify_destination("23.102.140.115")
+    assert provider == "azure-hosted"
+    assert confidence == "ambiguous"
+
+
+def test_anthropic_range_covers_the_full_rdap_allocation():
+    """ARIN allocates 160.79.104.0/21; an earlier hand-written /23 silently
+    missed real Claude traffic in the rest of the block."""
+    assert classify_destination("160.79.111.5") == ("anthropic", "likely")

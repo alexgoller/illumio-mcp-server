@@ -1,6 +1,7 @@
 import ipaddress
 import json
 import logging
+import pathlib
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -109,24 +110,64 @@ def _iso(value, suffix: str) -> str:
 # for endpoint egress it usually does not -- so without this a shadow-AI report
 # is a list of IPs, which answers nothing. Ranges are coarse on purpose:
 # "this went to Anthropic" is the useful claim, not which edge node.
-AI_PROVIDER_RANGES = [
-    # Vendor-owned ranges: a hit here names the vendor.
-    ("anthropic", "likely", ["160.79.104.0/23"]),
-    ("openai",    "likely", ["23.102.140.112/28", "13.66.11.96/28",
-                             "104.210.133.240/28"]),
-
-    # Shared infrastructure. A hit narrows the field but does NOT identify a
-    # vendor: Anthropic and OpenAI both front on Cloudflare, and 20.0.0.0/8 is
-    # the whole of Azure, not just Azure OpenAI. Reporting these as a vendor
-    # would tag every Azure-hosted business app as shadow AI, so they are
-    # named for what they actually prove and flagged ambiguous.
+# Fallback table, used only when the generated data file is missing (e.g. an
+# editable checkout with no refresh run). The real table lives in
+# src/illumio_mcp/data/ip_ranges.json, produced by scripts/refresh_ip_ranges.py
+# from RDAP and vendor-published lists. Kept deliberately minimal: a stale
+# hand-written fallback that silently disagrees with the registry is the exact
+# failure this was built to remove.
+_FALLBACK_PROVIDER_RANGES = [
+    ("anthropic", "likely", ["160.79.104.0/21"]),
     ("cloudflare-fronted", "ambiguous", ["172.64.0.0/13", "162.158.0.0/15",
                                          "162.159.0.0/16", "104.16.0.0/13",
                                          "104.24.0.0/14"]),
-    ("azure-hosted",  "ambiguous", ["20.0.0.0/8"]),
+    ("azure-hosted", "ambiguous", ["20.0.0.0/8"]),
     ("google-hosted", "ambiguous", ["142.250.0.0/15", "172.217.0.0/16",
                                     "216.58.192.0/19"]),
 ]
+
+_IP_RANGES_FILE = (pathlib.Path(__file__).resolve().parent.parent
+                   / "data" / "ip_ranges.json")
+
+
+def _load_provider_ranges():
+    """Load the generated attribution table, compiled to network objects once.
+
+    No network I/O: the file is generated in CI and shipped. Parsing every CIDR
+    per flow row would be the obvious way to make attribution the slowest part
+    of a 500-row report, so networks are compiled here and reused.
+    """
+    raw = None
+    try:
+        raw = json.loads(_IP_RANGES_FILE.read_text())
+    except FileNotFoundError:
+        logger.debug("ip_ranges.json not found, using built-in fallback table")
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("could not read %s (%s); using built-in fallback table",
+                       _IP_RANGES_FILE, e)
+
+    if raw:
+        entries = [(e["provider"], e.get("confidence", "ambiguous"), e.get("cidrs", []))
+                   for e in raw.get("entries", [])]
+        generated_at = raw.get("generated_at")
+    else:
+        entries = _FALLBACK_PROVIDER_RANGES
+        generated_at = None
+
+    compiled = []
+    for provider, confidence, cidrs in entries:
+        nets = []
+        for cidr in cidrs:
+            try:
+                nets.append(ipaddress.ip_network(cidr))
+            except ValueError:
+                logger.warning("skipping unparseable range %r for %s", cidr, provider)
+        if nets:
+            compiled.append((provider, confidence, nets))
+    return compiled, generated_at
+
+
+AI_PROVIDER_RANGES, IP_RANGES_GENERATED_AT = _load_provider_ranges()
 
 
 def classify_destination(ip):
@@ -142,13 +183,9 @@ def classify_destination(ip):
         addr = ipaddress.ip_address(str(ip))
     except ValueError:
         return None, None
-    for provider, confidence, cidrs in AI_PROVIDER_RANGES:
-        for cidr in cidrs:
-            try:
-                if addr in ipaddress.ip_network(cidr):
-                    return provider, confidence
-            except ValueError:
-                continue
+    for provider, confidence, nets in AI_PROVIDER_RANGES:
+        if any(addr in net for net in nets if net.version == addr.version):
+            return provider, confidence
     return None, None
 
 
