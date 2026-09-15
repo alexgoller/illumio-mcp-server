@@ -6,6 +6,47 @@ from ..log_scrub import ScrubbedArgs
 logger = logging.getLogger('illumio_mcp')
 
 
+def _actor_reference(ref, pce, value_href_map, side: str):
+    """Turn one provider/consumer reference into a PCE actor object.
+
+    Accepts "ams", "iplist:<name>", "key=value" label shorthand, or a bare
+    HREF. The HREF branch dispatches on the path segment: previously ANY
+    unrecognised string was assumed to be a label, so an IP-list HREF became
+    {"label": {"href": ...}} and the PCE answered
+
+        406 invalid_uri: Invalid URI: {{"href"=>"/orgs/.../ip_lists/..."}}
+
+    Returns (actor, error_message). Exactly one is None.
+    """
+    if not isinstance(ref, str):
+        return None, f"{side} reference must be a string, got {type(ref).__name__}: {ref!r}"
+    if ref == "ams":
+        return {"actors": "ams"}, None
+    if ref.startswith("iplist:"):
+        name = ref.split(":", 1)[1]
+        matches = pce.ip_lists.get(params={"name": name})
+        if not matches:
+            return None, f"IP list not found: {name}"
+        return {"ip_list": {"href": matches[0].href}}, None
+    if ref in value_href_map:
+        return {"label": {"href": value_href_map[ref]}}, None
+    if ref.startswith("/orgs/"):
+        for segment, key in (("/ip_lists/", "ip_list"),
+                             ("/labels/", "label"),
+                             ("/label_groups/", "label_group"),
+                             ("/workloads/", "workload"),
+                             ("/virtual_services/", "virtual_service"),
+                             ("/virtual_servers/", "virtual_server")):
+            if segment in ref:
+                return {key: {"href": ref}}, None
+        return None, (f"Unrecognised {side} HREF: {ref}. Expected one of "
+                      "ip_lists, labels, label_groups, workloads, virtual_services, "
+                      "virtual_servers.")
+    return None, (f"Unrecognised {side} reference: {ref!r}. Use 'ams', "
+                  "'iplist:<name>', 'key=value', or an HREF.")
+
+
+
 def handle_create_deny_rule(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("CREATE DENY RULE CALLED")
@@ -65,43 +106,21 @@ def handle_create_deny_rule(ctx, arguments: dict) -> list:
 
         # Build providers
         providers = []
-        for provider in arguments["providers"]:
-            if provider == "ams":
-                providers.append({"actors": "ams"})
-            elif provider.startswith("iplist:"):
-                ip_list_name = provider.split(":", 1)[1]
-                ip_lists = pce.ip_lists.get(params={"name": ip_list_name})
-                if ip_lists:
-                    providers.append({"ip_list": {"href": ip_lists[0].href}})
-                else:
-                    return [types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": f"IP list not found: {ip_list_name}"})
-                    )]
-            elif provider in value_href_map:
-                providers.append({"label": {"href": value_href_map[provider]}})
-            else:
-                providers.append({"label": {"href": provider}})
+        for ref in arguments["providers"]:
+            actor, problem = _actor_reference(ref, pce, value_href_map, "provider")
+            if problem:
+                return [types.TextContent(type="text",
+                        text=json.dumps({"error": problem}))]
+            providers.append(actor)
 
         # Build consumers
         consumers = []
-        for consumer in arguments["consumers"]:
-            if consumer == "ams":
-                consumers.append({"actors": "ams"})
-            elif consumer.startswith("iplist:"):
-                ip_list_name = consumer.split(":", 1)[1]
-                ip_lists = pce.ip_lists.get(params={"name": ip_list_name})
-                if ip_lists:
-                    consumers.append({"ip_list": {"href": ip_lists[0].href}})
-                else:
-                    return [types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": f"IP list not found: {ip_list_name}"})
-                    )]
-            elif consumer in value_href_map:
-                consumers.append({"label": {"href": value_href_map[consumer]}})
-            else:
-                consumers.append({"label": {"href": consumer}})
+        for ref in arguments["consumers"]:
+            actor, problem = _actor_reference(ref, pce, value_href_map, "consumer")
+            if problem:
+                return [types.TextContent(type="text",
+                        text=json.dumps({"error": problem}))]
+            consumers.append(actor)
 
         # Build ingress services
         proto_map = {"tcp": 6, "udp": 17, "icmp": 1}
