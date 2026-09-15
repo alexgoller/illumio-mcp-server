@@ -80,6 +80,7 @@ from .credentials import (
     handle_delete_pce_credentials,
     handle_check_pce_credentials_status,
 )
+from .meta import handle_get_server_changelog
 
 
 _OP_ADMIN = frozenset({OPERATOR, ADMIN})
@@ -148,6 +149,10 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     "register-pce-credentials":   ToolSpec(handle_register_pce_credentials,    roles=ALL_ROLES, requires_pce=False, mutating=True),
     "delete-pce-credentials":     ToolSpec(handle_delete_pce_credentials,      roles=ALL_ROLES, requires_pce=False, mutating=True),
     "check-pce-credentials-status": ToolSpec(handle_check_pce_credentials_status, roles=ALL_ROLES, requires_pce=False),
+
+    # Server self-description. No PCE, readable by everyone: a session needs
+    # this precisely when it cannot trust its cached view of the server.
+    "get-server-changelog":       ToolSpec(handle_get_server_changelog, roles=ALL_ROLES, requires_pce=False),
 }
 
 

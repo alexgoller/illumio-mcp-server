@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 47 tools, grouped by area. Generated from the server's own registry by
+All 48 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -128,6 +128,7 @@ which other apps communicate with this... |
 | Tool | Access | Type | Description |
 |---|---|---|---|
 | `discover-process-egress` | reader | *read* | Find which processes talk to destinations outside this PCE's managed estate - the shadow-IT / unsanctioned-egress question. Returns ranked findings of process -> external destination with port, protocol, the user, current policy decision and volume, preferring an FQDN over a bare IP where the PCE resolved one. Use this instead of get-traffic-flows when the question is 'what is talking out', not 'show me all traffic'. |
+| `get-server-changelog` | reader | *read* | What changed in this MCP server. Call this when tool behaviour does not match what you expect, after the server has been updated mid-session, or before relying on assumptions formed earlier in a long session -- a cached tools/list and remembered response shapes are not refreshed when the server changes. The `unlearn` field lists behaviour changes that make previously correct assumptions wrong. Needs no PCE connection. |
 
 ## Confirmation-gated tools
 
