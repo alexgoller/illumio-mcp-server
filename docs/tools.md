@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 48 tools, grouped by area. Generated from the server's own registry by
+All 50 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -60,7 +60,7 @@ HTTP mode; in stdio mode every caller is `admin`.
 
 | Tool | Access | Type | Description |
 |---|---|---|---|
-| `create-service` | operator | **write** | Create a new service definition in the PCE |
+| `create-service` | operator | **write** | Create a service in the PCE. Supply at least one of service_ports, windows_services or windows_egress_services. windows_egress_... |
 | `delete-service` | operator | **write** | Delete a service from the PCE. Identify by href (preferred) or name. |
 | `get-services` | reader | *read* | Get services from the PCE with optional filtering |
 | `identify-infrastructure-services` | reader | *read* | Analyze traffic flows to identify infrastructure services in your environment.
@@ -75,9 +75,11 @@ Builds an app-to-app communication graph and com... |
 | `create-ruleset` | operator | **write** | Create a ruleset in the PCE with support for ring-fencing patterns |
 | `delete-deny-rule` | operator | **write** | Delete a deny rule from a ruleset by its href |
 | `delete-ruleset` | operator | **write** | Delete a ruleset from the PCE by its href |
+| `delete-sec-rule` | operator | **write** | Delete a single allow rule from a ruleset, leaving the rest of the ruleset intact. For deny rules use delete-deny-rule. |
 | `get-rulesets` | reader | *read* | Get rulesets from the PCE with optional filtering |
 | `update-deny-rule` | operator | **write** | Update an existing deny rule in a ruleset. Identify the rule by its href. |
 | `update-ruleset` | operator | **write** | Update an existing ruleset in the PCE. Provide either 'href' or 'name' (but not both) to identify the ruleset. |
+| `update-sec-rule` | operator | **write** | Update an allow rule inside a ruleset, identified by its href. Only the fields you supply change. Use this to refine a rule in... |
 
 ## Traffic analysis
 

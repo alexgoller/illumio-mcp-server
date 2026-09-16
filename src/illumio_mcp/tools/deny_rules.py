@@ -2,11 +2,14 @@ import json
 import logging
 import mcp.types as types
 from ..log_scrub import ScrubbedArgs
+from ..service_refs import (
+    resolve_ingress_services, windows_qualified_services, ServiceRefError,
+)
 
 logger = logging.getLogger('illumio_mcp')
 
 
-def _actor_reference(ref, pce, value_href_map, side: str):
+def actor_reference(ref, pce, value_href_map, side: str):
     """Turn one provider/consumer reference into a PCE actor object.
 
     Accepts "ams", "iplist:<name>", "key=value" label shorthand, or a bare
@@ -107,7 +110,7 @@ def handle_create_deny_rule(ctx, arguments: dict) -> list:
         # Build providers
         providers = []
         for ref in arguments["providers"]:
-            actor, problem = _actor_reference(ref, pce, value_href_map, "provider")
+            actor, problem = actor_reference(ref, pce, value_href_map, "provider")
             if problem:
                 return [types.TextContent(type="text",
                         text=json.dumps({"error": problem}))]
@@ -116,20 +119,34 @@ def handle_create_deny_rule(ctx, arguments: dict) -> list:
         # Build consumers
         consumers = []
         for ref in arguments["consumers"]:
-            actor, problem = _actor_reference(ref, pce, value_href_map, "consumer")
+            actor, problem = actor_reference(ref, pce, value_href_map, "consumer")
             if problem:
                 return [types.TextContent(type="text",
                         text=json.dumps({"error": problem}))]
             consumers.append(actor)
 
-        # Build ingress services
-        proto_map = {"tcp": 6, "udp": 17, "icmp": 1}
-        ingress_services = []
-        for svc in arguments["ingress_services"]:
-            proto_val = svc["proto"]
-            if isinstance(proto_val, str):
-                proto_val = proto_map.get(proto_val.lower(), proto_val)
-            ingress_services.append({"port": svc["port"], "proto": proto_val})
+        # Resolve ingress services. Inline ports, service hrefs and service
+        # names all land here; anything unresolvable raises before the POST.
+        try:
+            ingress_services, resolved_display = resolve_ingress_services(
+                pce, arguments.get("ingress_services"))
+        except ServiceRefError as e:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "invalid_ingress_services", "message": str(e)}, indent=2))]
+
+        process_qualified = windows_qualified_services(pce, ingress_services)
+        if process_qualified:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "process_qualified_deny_unsupported",
+                "services": process_qualified,
+                "message": (
+                    "Deny rules cannot use a service with Windows process or "
+                    "service qualifiers -- the PCE matches the deny without "
+                    "process context, so it would silently apply to the ports "
+                    "alone. Write the process-qualified rule as an ALLOW above a "
+                    "broad deny instead; allow rules are evaluated first."
+                ),
+            }, indent=2))]
 
         # Build the rule payload
         rule_payload = {
@@ -151,7 +168,11 @@ def handle_create_deny_rule(ctx, arguments: dict) -> list:
 
         response = {
             "message": f"Successfully created {rule_type} rule",
-            "rule": result
+            "rule": result,
+            # Echo what was actually written, with names alongside hrefs -- an
+            # href on its own is unreadable, and this is what lets a caller see
+            # that "All Services" is what landed.
+            "ingress_services_resolved": resolved_display,
         }
         if override_warning:
             response["override_deny_warning"] = override_warning
@@ -221,14 +242,22 @@ def handle_update_deny_rule(ctx, arguments: dict) -> list:
                     raw_consumers.append({"label": {"href": c}})
             update_data["consumers"] = raw_consumers
 
+        resolved_display = None
         if arguments.get("ingress_services"):
-            proto_map = {"tcp": 6, "udp": 17, "icmp": 1}
-            raw_services = []
-            for svc in arguments["ingress_services"]:
-                proto_val = svc["proto"]
-                if isinstance(proto_val, str):
-                    proto_val = proto_map.get(proto_val.lower(), proto_val)
-                raw_services.append({"port": svc["port"], "proto": proto_val})
+            try:
+                raw_services, resolved_display = resolve_ingress_services(
+                    pce, arguments["ingress_services"])
+            except ServiceRefError as e:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "error": "invalid_ingress_services", "message": str(e)}, indent=2))]
+            process_qualified = windows_qualified_services(pce, raw_services)
+            if process_qualified:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "error": "process_qualified_deny_unsupported",
+                    "services": process_qualified,
+                    "message": ("Deny rules cannot use process-qualified services. "
+                                "Use a qualified allow above a broad deny."),
+                }, indent=2))]
             update_data["ingress_services"] = raw_services
 
         if not update_data:
@@ -238,7 +267,10 @@ def handle_update_deny_rule(ctx, arguments: dict) -> list:
 
         return [types.TextContent(
             type="text",
-            text=json.dumps({"message": f"Successfully updated deny rule {href}", "updated_fields": list(update_data.keys())}, indent=2)
+            text=json.dumps({"message": f"Successfully updated deny rule {href}",
+                             "updated_fields": list(update_data.keys()),
+                             **({"ingress_services_resolved": resolved_display}
+                                if resolved_display else {})}, indent=2)
         )]
     except Exception as e:
             error_msg = f"Failed to update deny rule: {str(e)}"
@@ -266,3 +298,8 @@ def handle_delete_deny_rule(ctx, arguments: dict) -> list:
             error_msg = f"Failed to delete deny rule: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+
+# Shared with sec_rules.py, which needs the same provider/consumer handling.
+# Public alias kept because the name was private when only this module used it.
+_actor_reference = actor_reference

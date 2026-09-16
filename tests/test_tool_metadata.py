@@ -55,7 +55,7 @@ def test_ringfence_batch_requires_confirm():
 def test_count_matches_expected():
     """Sanity check: tool count is stable. Bump this when you intentionally
     add or remove a tool."""
-    assert len(TOOL_REGISTRY) == 48, \
+    assert len(TOOL_REGISTRY) == 50, \
         f"Tool count drifted to {len(TOOL_REGISTRY)}; update this test if intentional"
 
 

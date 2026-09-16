@@ -3,6 +3,10 @@ import logging
 import mcp.types as types
 from illumio import RuleSet, LabelSet, Rule, AMS, ServicePort
 from ..log_scrub import ScrubbedArgs
+from ..service_refs import (
+    resolve_ingress_services, windows_qualified_services, consumer_os_warning,
+    reject_egress_service_in_ingress, ServiceRefError,
+)
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -198,7 +202,7 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
         if arguments.get("rules"):
             logger.debug("Processing rules: %s", ScrubbedArgs(arguments, 'rules'))
 
-            for rule_def in arguments["rules"]:
+            for rule_index, rule_def in enumerate(arguments["rules"]):
                 logger.debug("Processing rule: %s", ScrubbedArgs(rule_def))
 
                 # Process providers
@@ -247,14 +251,50 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
                     else:
                         consumers.append(pce.labels.get_by_reference(consumer))
 
-                # Create ingress services
-                ingress_services = []
-                for svc in rule_def["ingress_services"]:
-                    service_port = ServicePort(
-                        port=svc["port"],
-                        proto=svc["proto"]
-                    )
-                    ingress_services.append(service_port)
+                # Resolve ingress services: inline ports, service hrefs and
+                # service names alike. Resolution happens before anything is
+                # written, so a bad reference cannot leave a half-built ruleset.
+                try:
+                    svc_payload, svc_display = resolve_ingress_services(
+                        pce, rule_def.get("ingress_services"))
+                except ServiceRefError as e:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "error": "invalid_ingress_services",
+                        "rule_index": rule_index,
+                        "message": str(e),
+                        "note": ("Ruleset and any earlier rules were created; this "
+                                 "rule was not."),
+                    }, indent=2))]
+
+                misplaced = reject_egress_service_in_ingress(pce, svc_payload)
+                if misplaced:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "error": "egress_service_in_ingress",
+                        "rule_index": rule_index,
+                        "message": misplaced,
+                    }, indent=2))]
+
+                # Consumer-side process qualifier, if any. The SDK's Rule has no
+                # egress_services field, so it is applied to the created rule
+                # rather than passed to Rule.build.
+                egress_payload, egress_display = [], []
+                if rule_def.get("egress_services"):
+                    try:
+                        egress_payload, egress_display = resolve_ingress_services(
+                            pce, rule_def["egress_services"])
+                    except ServiceRefError as e:
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "error": "invalid_egress_services",
+                            "rule_index": rule_index,
+                            "message": str(e),
+                        }, indent=2))]
+
+                # ServicePort for inline entries so the SDK serialises them as
+                # before; href entries stay dicts, which Rule.build accepts.
+                ingress_services = [
+                    ServicePort(**item) if "port" in item else dict(item)
+                    for item in svc_payload
+                ]
 
                 # Determine rule type
                 rule_type = rule_def.get("rule_type", "allow")
@@ -278,12 +318,18 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
                             raw_consumers.append({"label": {"href": c.href}})
                         elif hasattr(c, 'href'):
                             raw_consumers.append({"ip_list": {"href": c.href}})
-                    raw_services = []
-                    for svc in ingress_services:
-                        proto_val = svc.proto
-                        if isinstance(proto_val, str):
-                            proto_val = proto_map.get(proto_val.lower(), proto_val)
-                        raw_services.append({"port": svc.port, "proto": proto_val})
+                    raw_services = svc_payload
+
+                    process_qualified = windows_qualified_services(pce, raw_services)
+                    if process_qualified:
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "error": "process_qualified_deny_unsupported",
+                            "rule_index": rule_index,
+                            "services": process_qualified,
+                            "message": ("Deny rules cannot use process-qualified "
+                                        "services. Use a qualified allow above a "
+                                        "broad deny."),
+                        }, indent=2))]
 
                     rule_payload = {
                         "enabled": True,
@@ -304,7 +350,7 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
                         "rule_type": rule_type,
                         "providers": [str(p) for p in providers],
                         "consumers": [str(c) for c in consumers],
-                        "services": [f"{s.port}/{s.proto}" for s in ingress_services],
+                        "services": svc_display,
                         "unscoped_consumers": rule_def.get("unscoped_consumers", False)
                     })
                 else:
@@ -317,14 +363,28 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
                     )
 
                     created_rule = pce.rules.create(rule, parent=ruleset)
-                    created_rules.append({
+
+                    if egress_payload:
+                        rule_href = created_rule.href
+                        if '/active/' in rule_href:
+                            rule_href = rule_href.replace('/active/', '/draft/')
+                        pce.put(rule_href, json={"egress_services": egress_payload})
+
+                    entry = {
                         "href": created_rule.href,
                         "rule_type": "allow",
                         "providers": [str(p) for p in providers],
                         "consumers": [str(c) for c in consumers],
-                        "services": [f"{s.port}/{s.proto}" for s in ingress_services],
+                        "services": svc_display,
                         "unscoped_consumers": rule_def.get("unscoped_consumers", False)
-                    })
+                    }
+                    if egress_display:
+                        entry["egress_services"] = egress_display
+                    warning = consumer_os_warning(
+                        pce, egress_payload or svc_payload, rule_def.get("consumers"))
+                    if warning:
+                        entry["policy_widening_warning"] = warning
+                    created_rules.append(entry)
 
         # Update the response to include rules
         return [types.TextContent(
