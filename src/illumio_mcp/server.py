@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .context import ToolContext
 from .pce import get_pce_from_env
+from .changelog import changelog_path
 from .tools import TOOL_REGISTRY
 from .auth.audit import AuditEntry, NullAuditLog
 
@@ -1949,7 +1950,14 @@ Traffic data records are invaluable for incident investigation:
 @server.list_resources()
 async def handle_list_resources() -> list[types.Resource]:
     """List Illumio knowledge base resources."""
-    resources = []
+    resources = [types.Resource(
+        uri=CHANGELOG_URI,
+        name="Server changelog",
+        description=("What changed in this MCP server, including behaviour "
+                     "changes that invalidate assumptions a long-running "
+                     "session may still be holding."),
+        mimeType="text/markdown",
+    )]
     for uri, info in ILLUMIO_RESOURCES.items():
         resources.append(types.Resource(
             uri=uri,
@@ -1959,10 +1967,21 @@ async def handle_list_resources() -> list[types.Resource]:
         ))
     return resources
 
+CHANGELOG_URI = "illumio://changelog"
+
+
 @server.read_resource()
 async def handle_read_resource(uri) -> str:
     """Read an Illumio knowledge base resource."""
     uri_str = str(uri)
+    if uri_str == CHANGELOG_URI:
+        # Same content as get-server-changelog, for clients that read resources
+        # rather than call tools. Served raw so a human reading it in a client
+        # sees the file as written.
+        path = changelog_path()
+        if path is None:
+            return "CHANGELOG.md was not found alongside this install."
+        return path.read_text(encoding="utf-8")
     if uri_str in ILLUMIO_RESOURCES:
         return ILLUMIO_RESOURCES[uri_str]["content"]
     raise ValueError(f"Unknown resource: {uri_str}")
@@ -3381,6 +3400,37 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
             inputSchema={
                 "type": "object",
                 "properties": {},
+            }
+        ),
+        types.Tool(
+            name="get-server-changelog",
+            description=(
+                "What changed in this MCP server. Call this when tool behaviour "
+                "does not match what you expect, after the server has been "
+                "updated mid-session, or before relying on assumptions formed "
+                "earlier in a long session -- a cached tools/list and remembered "
+                "response shapes are not refreshed when the server changes. The "
+                "`unlearn` field lists behaviour changes that make previously "
+                "correct assumptions wrong. Needs no PCE connection."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "description": (
+                            "Only report releases newer than this version, e.g. "
+                            "'0.2.0'. Omit for the full history."
+                        ),
+                    },
+                    "unlearn_only": {
+                        "type": "boolean",
+                        "description": (
+                            "Return only the behaviour changes that invalidate "
+                            "earlier assumptions, omitting the feature lists."
+                        ),
+                    },
+                },
             }
         ),
     ])

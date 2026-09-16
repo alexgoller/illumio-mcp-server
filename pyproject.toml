@@ -1,6 +1,6 @@
 [project]
 name = "illumio-mcp"
-version = "0.1.0"
+version = "0.3.0"
 description = "A MCP server project"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -48,6 +48,7 @@ packages = ["src/illumio_mcp"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/illumio_mcp/data/ip_ranges.json" = "illumio_mcp/data/ip_ranges.json"
+"CHANGELOG.md" = "illumio_mcp/data/CHANGELOG.md"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
