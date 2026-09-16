@@ -39,3 +39,18 @@ illumio-mcp.log
 # mcporter / MCP client configs (may contain credentials)
 config/
 illumio-platform-api.pdf
+
+# Runtime state. data/audit.db holds a record of every tool call and
+# data/jti.db holds replay-protection state; neither belongs in git.
+data/
+
+# Captured HTTP traffic. HAR files record full request headers -- the ones in
+# this repo carry Authorization and Set-Cookie -- so they are credential
+# material, not debugging leftovers.
+*.har
+
+# Third-party documentation kept locally for reference
+knowledge-base/
+
+# Harness scratch file
+.acpx-permission-test

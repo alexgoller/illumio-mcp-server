@@ -11,6 +11,9 @@ from illumio.util.jsonutils import Reference
 from ..log_scrub import ScrubbedArgs
 from .traffic import to_dataframe, to_query_start, to_query_end
 from ..label_refs import normalise_label_value
+from ..service_refs import (
+    resolve_ingress_services, ServiceRefError, ALL_SERVICES,
+)
 
 # MCP_BUG_MAX_RESULTS (tools/constants.py) bounds how many rows we hand back
 # to the client. Ringfence discovery hands back no flows at all -- it collapses
@@ -82,14 +85,40 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         for l in pce.labels.get(params={'max_results': 10000}):
             label_href_map[l.href] = {"key": l.key, "value": l.value}
 
-        # Step 2: Find "All Services" service object and "Any (0.0.0.0/0)" IP list
-        all_services = pce.services.get(params={"name": "All Services"})
-        all_services_href = None
-        if all_services:
-            all_services_href = all_services[0].href
-            logger.debug(f"Found All Services: {all_services_href}")
-        else:
-            logger.warning("'All Services' service object not found, will use port -1 fallback")
+        # Step 2: Resolve the service the deny rule will use, plus the Any IP list.
+        #
+        # `deny_service` defaults to All Services -- "deny everything except the
+        # allows above" -- but a caller can narrow it (admin ports only, say)
+        # without a second call. Resolved through the shared resolver so the
+        # name match is exact: the PCE filters ?name= as a substring.
+        # Only selective ringfences write a deny rule, so only they need this.
+        # Resolving it unconditionally made a transient lookup failure break
+        # plain and dry-run ringfences that never touch a deny service.
+        explicit_deny_service = arguments.get("deny_service")
+        deny_service_ref = explicit_deny_service or ALL_SERVICES
+        resolved_deny_services, deny_services_display = [], []
+
+        if selective:
+            try:
+                resolved_deny_services, deny_services_display = resolve_ingress_services(
+                    pce, deny_service_ref)
+            except ServiceRefError as e:
+                # A deny service the caller NAMED is their intent: substituting
+                # something broader would silently write different policy, so
+                # that is fatal. The All Services default is recoverable -- the
+                # port -1 fallback below is what this tool did before.
+                if explicit_deny_service:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "error": "invalid_deny_service", "message": str(e)}, indent=2))]
+                logger.warning("could not resolve %r (%s); using the port -1 fallback",
+                               ALL_SERVICES, e)
+
+        all_services_href = next(
+            (item.get("href") for item in resolved_deny_services if item.get("href")), None)
+
+        # Only selective mode writes a deny rule. Saying so beats ignoring a
+        # parameter the caller deliberately set.
+        deny_service_ignored = bool(explicit_deny_service) and not selective
 
         any_iplist_href = None
         if deny_consumer in ("any", "ams_and_any"):
@@ -268,6 +297,9 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
             "skip_allowed": skip_allowed,
             "flows_analysed": {"inbound": len(inbound_flows),
                                "outbound": len(outbound_flows)},
+            **({"deny_service_ignored": (
+                "deny_service only applies when selective=true, which writes the "
+                "deny rule. It was not used.")} if deny_service_ignored else {}),
             "policy_coverage": {
                 "already_allowed": already_allowed_count,
                 "newly_allowed": newly_allowed_count,
@@ -445,7 +477,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         # Step 10: For selective mode, create a deny rule blocking all inbound traffic
         if selective and not summary.get("has_deny_all_inbound", False):
             if all_services_href:
-                deny_services = [{"href": all_services_href}]
+                deny_services = resolved_deny_services
             else:
                 deny_services = [{"port": -1, "proto": 6}, {"port": -1, "proto": 17}]
 
@@ -484,6 +516,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
                 "description": f"Deny all inbound traffic to {app_name} ({env_name}) - selective enforcement",
                 "consumers": consumer_desc,
                 "deny_consumer_mode": deny_consumer,
+                "ingress_services_resolved": deny_services_display,
                 "providers": "All Workloads (in scope)",
                 "services": "All Services"
             })

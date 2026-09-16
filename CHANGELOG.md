@@ -22,6 +22,54 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.0] — 2026-09-16
+
+### Added
+
+- `create-service` / `update-service` accept `windows_services` and
+  `windows_egress_services`, so a service can be qualified by process.
+  `service_ports` is no longer required.
+- `get-services` returns `windows_egress_services` and filters on
+  `egress_process_name`.
+- Rule tools take service references: `{"href": ...}` or
+  `{"service": "All Services"}` alongside inline `{"port", "proto"}`.
+- `update-sec-rule` and `delete-sec-rule` — allow rules can be changed in place
+  instead of rebuilding the ruleset.
+- `egress_services` on `create-ruleset` rules and `update-sec-rule`: the
+  consumer-side process qualifier.
+- `create-ringfence` takes `deny_service` (default `All Services`).
+
+### Fixed
+
+- Rule tools rebuilt every `ingress_services` entry as `{port, proto}`, silently
+  DISCARDING an `href`. The call succeeded and the PCE stored `0/tcp` — a rule
+  that looked like policy and was not. Unknown and conflicting keys are now hard
+  errors and nothing is sent until every entry resolves.
+- Service names resolve exactly. The PCE matches `?name=` as a substring, so
+  `S-HTTP` also returns `S-HTTPS` and `S-HTTPS-UDP`.
+
+### Unlearn
+
+- **`ingress_services` no longer silently accepts a mixed entry.**
+  `{"port": 0, "proto": "tcp", "href": "..."}` is now rejected naming both
+  fields. Anything that relied on the href being ignored will stop.
+- **`{"port": 0}` never meant "all ports".** For any service use
+  `{"service": "All Services"}`; an empty list is rejected by the PCE.
+- **A service object carries an OS type, and the three qualifier lists are
+  mutually exclusive.** Supplying `service_ports` with `windows_*` made the PCE
+  keep one, null the others, and still return 201. That combination is now
+  refused up front — so "chrome.exe on 443" is NOT one service object.
+- **`windows_egress_services` takes `process_name`/`service_name` only.** The
+  PCE rejects `port`/`proto` there. The port belongs on the rule.
+- **A Windows egress service cannot go in `ingress_services`.** It belongs in
+  the rule's `egress_services`, which qualifies the consumer's process while
+  `ingress_services` stays the provider-side port. The two together express
+  "this binary, to that port".
+- Deny rules cannot use process-qualified services at all; write a qualified
+  allow above a broad deny.
+
+---
+
 ## [0.3.0] — 2026-09-15
 
 ### Changed

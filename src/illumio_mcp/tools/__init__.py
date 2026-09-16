@@ -80,6 +80,7 @@ from .credentials import (
     handle_delete_pce_credentials,
     handle_check_pce_credentials_status,
 )
+from .sec_rules import handle_update_sec_rule, handle_delete_sec_rule
 from .meta import handle_get_server_changelog
 
 
@@ -118,6 +119,8 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     "create-deny-rule":           ToolSpec(handle_create_deny_rule,         roles=_OP_ADMIN, mutating=True),
     "update-deny-rule":           ToolSpec(handle_update_deny_rule,         roles=_OP_ADMIN, mutating=True),
     "delete-deny-rule":           ToolSpec(handle_delete_deny_rule,         roles=_OP_ADMIN, mutating=True),
+    "update-sec-rule":            ToolSpec(handle_update_sec_rule,          roles=_OP_ADMIN, mutating=True),
+    "delete-sec-rule":            ToolSpec(handle_delete_sec_rule,          roles=_OP_ADMIN, mutating=True),
     # Traffic
     "get-traffic-flows":          ToolSpec(handle_get_traffic_flows,        roles=ALL_ROLES),
     "get-traffic-flows-summary":  ToolSpec(handle_get_traffic_flows_summary,roles=ALL_ROLES),

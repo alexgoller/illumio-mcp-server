@@ -47,3 +47,37 @@ def test_saturation_is_reported_and_reaches_the_dry_run():
 def test_flows_analysed_is_reported():
     """Callers cannot judge completeness without knowing the sample size."""
     assert "flows_analysed" in inspect.getsource(ringfence.handle_create_ringfence)
+
+
+# ----- deny_service resolution must not break the non-selective path -----
+
+def test_deny_service_is_only_resolved_for_selective_ringfences():
+    """Only selective mode writes a deny rule.
+
+    Resolving the deny service unconditionally made every ringfence -- plain,
+    dry-run, non-selective -- depend on a service lookup it never uses, so a
+    transient failure there broke runs that have no deny rule at all.
+    """
+    src = inspect.getsource(ringfence.handle_create_ringfence)
+    resolve_at = src.index("resolve_ingress_services(")
+    guard_at = src.index("if selective:")
+    assert guard_at < resolve_at, (
+        "the deny-service lookup is not inside the `if selective:` branch"
+    )
+
+
+def test_default_deny_service_failure_falls_back_rather_than_erroring():
+    """The All Services default is recoverable -- the port -1 fallback predates
+    this feature. Only a deny service the caller NAMED is fatal, because
+    substituting something broader would silently write different policy."""
+    src = inspect.getsource(ringfence.handle_create_ringfence)
+    assert "if explicit_deny_service:" in src
+    assert "port -1 fallback" in src
+
+
+def test_ignored_deny_service_is_reported_not_swallowed():
+    src = inspect.getsource(ringfence.handle_create_ringfence)
+    assert "deny_service_ignored" in src, (
+        "a deny_service passed without selective=true must be reported, "
+        "not silently dropped"
+    )

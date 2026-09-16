@@ -2598,13 +2598,26 @@ async def handle_list_tools() -> list[types.Tool]:
                                 "ingress_services": {
                                     "type": "array",
                                     "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "port": {"type": "integer"},
-                                            "proto": {"type": "string"}
-                                        },
-                                        "required": ["port", "proto"]
-                                    }
+                                "type": "object",
+                                "oneOf": [
+                                    {"properties": {"port": {"type": "integer"}, "to_port": {"type": "integer"}, "proto": {"description": "tcp, udp, icmp or a protocol number"}}, "required": ["port"], "additionalProperties": False},
+                                    {"properties": {"href": {"type": "string"}}, "required": ["href"], "additionalProperties": False},
+                                    {"properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False}
+                                ]
+                            },
+                                    "description": "Services this rule covers. Each entry is EITHER an inline port ({'port': 443, 'proto': 'tcp'}), OR a service object by href ({'href': '/orgs/1/sec_policy/draft/services/42'}), OR a service by exact name ({'service': 'All Services'}). Mixing those keys in one entry is an error. For 'any service' use {'service': 'All Services'} — an empty list is rejected by the PCE and {'port': 0} does not mean all ports."
+                                },
+                                "egress_services": {
+                                    "type": "array",
+                                    "items": {
+                                "type": "object",
+                                "oneOf": [
+                                    {"properties": {"port": {"type": "integer"}, "to_port": {"type": "integer"}, "proto": {"description": "tcp, udp, icmp or a protocol number"}}, "required": ["port"], "additionalProperties": False},
+                                    {"properties": {"href": {"type": "string"}}, "required": ["href"], "additionalProperties": False},
+                                    {"properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False}
+                                ]
+                            },
+                                    "description": "Consumer-side process qualifier: services carrying windows_egress_services, which restrict WHICH PROCESS on the consumer may use this rule. Separate from ingress_services (the provider-side port) — the PCE refuses a Windows egress service in ingress_services. Use both together for 'this binary, to that port'."
                                 },
                                 "unscoped_consumers": {
                                     "type": "boolean",
@@ -2652,14 +2665,14 @@ async def handle_list_tools() -> list[types.Tool]:
                     "ingress_services": {
                         "type": "array",
                         "items": {
-                            "type": "object",
-                            "properties": {
-                                "port": {"type": "integer"},
-                                "proto": {"type": "string"}
+                        "type": "object",
+                        "oneOf": [
+                            {"properties": {"port": {"type": "integer"}, "to_port": {"type": "integer"}, "proto": {"description": "tcp, udp, icmp or a protocol number"}}, "required": ["port"], "additionalProperties": False},
+                            {"properties": {"href": {"type": "string"}}, "required": ["href"], "additionalProperties": False},
+                            {"properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False}
+                        ]
                             },
-                            "required": ["port", "proto"]
-                        },
-                        "description": "Services to deny (e.g., [{'port': 3389, 'proto': 'tcp'}])"
+                        "description": "Services this rule covers. Each entry is EITHER an inline port ({'port': 443, 'proto': 'tcp'}), OR a service object by href ({'href': '/orgs/1/sec_policy/draft/services/42'}), OR a service by exact name ({'service': 'All Services'}). Mixing those keys in one entry is an error. For 'any service' use {'service': 'All Services'} — an empty list is rejected by the PCE and {'port': 0} does not mean all ports. Deny rules cannot use services carrying Windows process qualifiers; write those as an allow above a broad deny."
                     },
                     "override_deny": {
                         "type": "boolean",
@@ -2686,13 +2699,14 @@ async def handle_list_tools() -> list[types.Tool]:
                     "port": {"type": "integer", "description": "Filter services by port number"},
                     "proto": {"type": "string", "description": "Filter services by protocol (e.g., tcp, udp)"},
                     "process_name": {"type": "string", "description": "Filter services by process name"},
+                    "egress_process_name": {"type": "string", "description": "Return only services whose windows_egress_services reference this process (substring, case-insensitive)."},
                     "max_results": {"type": "integer", "description": "Maximum number of services to return"},
                 }
             }
         ),
         types.Tool(
             name="create-service",
-            description="Create a new service definition in the PCE",
+            description="Create a service in the PCE. Supply at least one of service_ports, windows_services or windows_egress_services. windows_egress_services matches a process on the consumer side and needs a Windows VEN there.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -2711,8 +2725,33 @@ async def handle_list_tools() -> list[types.Tool]:
                         },
                         "description": "Array of port/protocol definitions"
                     },
+                    "windows_services": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "process_name": {"type": "string", "description": "Process binary. A full path (C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe) matches that binary only; a bare name (chrome.exe) matches any binary so named in any directory."},
+                                "service_name": {"type": "string", "description": "Windows service name"},
+                                "port": {"type": "integer", "description": "Port number (optional)"},
+                                "to_port": {"type": "integer", "description": "End port for a range (optional)"},
+                                "proto": {"description": "Protocol: 6/17 or 'tcp'/'udp'"}
+                            }
+                        },
+                        "description": "Inbound Windows process/service qualifiers. Each entry needs at least one of port, process_name, service_name."
+                    },
+                    "windows_egress_services": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "process_name": {"type": "string", "description": "Process binary. A full path (C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe) matches that binary only; a bare name (chrome.exe) matches any binary so named in any directory."},
+                                "service_name": {"type": "string", "description": "Windows service name"}
+                            }
+                        },
+                        "description": "Outbound process qualifiers, matched on the CONSUMER side. Takes process_name/service_name ONLY — the PCE rejects port/proto here, so pair it with service_ports for the port. Requires a Windows VEN on the consumer; non-Windows consumers ignore the process and match on port alone."
+                    },
                 },
-                "required": ["name", "service_ports"]
+                "required": ["name"]
             }
         ),
         types.Tool(
@@ -2737,6 +2776,31 @@ async def handle_list_tools() -> list[types.Tool]:
                             "required": ["proto"]
                         },
                         "description": "New port/protocol definitions (replaces existing)"
+                    },
+                    "windows_services": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "process_name": {"type": "string", "description": "Process binary. A full path (C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe) matches that binary only; a bare name (chrome.exe) matches any binary so named in any directory."},
+                                "service_name": {"type": "string", "description": "Windows service name"},
+                                "port": {"type": "integer", "description": "Port number (optional)"},
+                                "to_port": {"type": "integer", "description": "End port for a range (optional)"},
+                                "proto": {"description": "Protocol: 6/17 or 'tcp'/'udp'"}
+                            }
+                        },
+                        "description": "Replaces the inbound Windows qualifiers."
+                    },
+                    "windows_egress_services": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "process_name": {"type": "string", "description": "Process binary. A full path (C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe) matches that binary only; a bare name (chrome.exe) matches any binary so named in any directory."},
+                                "service_name": {"type": "string", "description": "Windows service name"}
+                            }
+                        },
+                        "description": "Replaces the outbound process qualifiers."
                     },
                 },
             }
@@ -2771,12 +2835,71 @@ async def handle_list_tools() -> list[types.Tool]:
                     "ingress_services": {
                         "type": "array",
                         "items": {
-                            "type": "object",
-                            "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}},
-                            "required": ["port", "proto"]
-                        },
-                        "description": "Updated services"
+                        "type": "object",
+                        "oneOf": [
+                            {"properties": {"port": {"type": "integer"}, "to_port": {"type": "integer"}, "proto": {"description": "tcp, udp, icmp or a protocol number"}}, "required": ["port"], "additionalProperties": False},
+                            {"properties": {"href": {"type": "string"}}, "required": ["href"], "additionalProperties": False},
+                            {"properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False}
+                        ]
+                            },
+                        "description": "Replaces the rule's services. Services this rule covers. Each entry is EITHER an inline port ({'port': 443, 'proto': 'tcp'}), OR a service object by href ({'href': '/orgs/1/sec_policy/draft/services/42'}), OR a service by exact name ({'service': 'All Services'}). Mixing those keys in one entry is an error. For 'any service' use {'service': 'All Services'} — an empty list is rejected by the PCE and {'port': 0} does not mean all ports."
                     },
+                },
+                "required": ["href"]
+            }
+        ),
+        types.Tool(
+            name="update-sec-rule",
+            description=(
+                "Update an allow rule inside a ruleset, identified by its href. Only the "
+                "fields you supply change. Use this to refine a rule in place — swapping an "
+                "inline port for a process-qualified service, for example — instead of "
+                "rebuilding the ruleset. For deny rules use update-deny-rule."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "href": {"type": "string", "description": "Rule href, e.g. /orgs/1/sec_policy/draft/rule_sets/2/sec_rules/3"},
+                    "ingress_services": {
+                        "type": "array",
+                        "items": {
+                                "type": "object",
+                                "oneOf": [
+                                    {"properties": {"port": {"type": "integer"}, "to_port": {"type": "integer"}, "proto": {"description": "tcp, udp, icmp or a protocol number"}}, "required": ["port"], "additionalProperties": False},
+                                    {"properties": {"href": {"type": "string"}}, "required": ["href"], "additionalProperties": False},
+                                    {"properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False}
+                                ]
+                            },
+                        "description": "Replaces the rule's services. Inline port, {href}, or {service: 'name'}."
+                    },
+                    "egress_services": {
+                        "type": "array",
+                        "items": {
+                        "type": "object",
+                        "oneOf": [
+                            {"properties": {"port": {"type": "integer"}, "to_port": {"type": "integer"}, "proto": {"description": "tcp, udp, icmp or a protocol number"}}, "required": ["port"], "additionalProperties": False},
+                            {"properties": {"href": {"type": "string"}}, "required": ["href"], "additionalProperties": False},
+                            {"properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False}
+                        ]
+                            },
+                        "description": "Consumer-side process qualifier: services carrying windows_egress_services, which restrict WHICH PROCESS on the consumer may use this rule. Separate from ingress_services (the provider-side port) — the PCE refuses a Windows egress service in ingress_services. Use both together for 'this binary, to that port'."
+                    },
+                    "providers": {"type": "array", "items": {"type": "string"}, "description": "Replaces providers. 'ams', 'iplist:<name>', 'key=value', or an href."},
+                    "consumers": {"type": "array", "items": {"type": "string"}, "description": "Replaces consumers. Same forms as providers."},
+                    "enabled": {"type": "boolean", "description": "Enable or disable the rule"},
+                    "description": {"type": "string", "description": "New description"},
+                    "unscoped_consumers": {"type": "boolean", "description": "True makes this an extra-scope rule"},
+                },
+                "required": ["href"]
+            }
+        ),
+        types.Tool(
+            name="delete-sec-rule",
+            description="Delete a single allow rule from a ruleset, leaving the rest of the ruleset intact. For deny rules use delete-deny-rule.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "href": {"type": "string", "description": "Rule href, e.g. /orgs/1/sec_policy/draft/rule_sets/2/sec_rules/3"},
                 },
                 "required": ["href"]
             }
@@ -3035,6 +3158,18 @@ reducing risk without requiring per-port policies.""",
                             "ruleset self-documenting — it shows the complete picture of app connectivity. "
                             "Set to true for minimal rulesets that only fill policy gaps.",
                         "default": False
+                    },
+                    "deny_service": {
+                        "type": "array",
+                        "items": {
+                        "type": "object",
+                        "oneOf": [
+                            {"properties": {"port": {"type": "integer"}, "to_port": {"type": "integer"}, "proto": {"description": "tcp, udp, icmp or a protocol number"}}, "required": ["port"], "additionalProperties": False},
+                            {"properties": {"href": {"type": "string"}}, "required": ["href"], "additionalProperties": False},
+                            {"properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False}
+                        ]
+                            },
+                        "description": "Service the selective-mode deny rule covers. Defaults to All Services ('deny everything except the allows above'). Narrow it to deny only specific ports."
                     },
                     "deny_consumer": {
                         "type": "string",
