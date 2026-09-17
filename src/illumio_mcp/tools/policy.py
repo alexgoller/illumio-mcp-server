@@ -10,7 +10,7 @@ from illumio.util.jsonutils import Reference
 
 from ..log_scrub import ScrubbedArgs
 from .traffic import to_dataframe, to_query_start, to_query_end
-from .constants import MCP_BUG_MAX_RESULTS
+from .constants import MCP_QUERY_MAX_RESULTS
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -174,7 +174,7 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
             "start_date": start_date,
             "end_date": end_date,
             "policy_decisions": ["allowed", "potentially_blocked", "blocked"],
-            "max_results": MCP_BUG_MAX_RESULTS,
+            "max_results": MCP_QUERY_MAX_RESULTS,
             "query_name": "compliance-check"
         }
 
@@ -398,7 +398,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
             include_sources=[[]],
             include_destinations=[[app_filter, env_filter]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
-            max_results=MCP_BUG_MAX_RESULTS,
+            max_results=MCP_QUERY_MAX_RESULTS,
             query_name='readiness-inbound'
         )
         inbound_flows = pce.get_traffic_flows_async(query_name='readiness-inbound', traffic_query=traffic_query)
@@ -410,7 +410,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
             include_sources=[[app_filter, env_filter]],
             include_destinations=[[]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
-            max_results=MCP_BUG_MAX_RESULTS,
+            max_results=MCP_QUERY_MAX_RESULTS,
             query_name='readiness-outbound'
         )
         outbound_flows = pce.get_traffic_flows_async(query_name='readiness-outbound', traffic_query=traffic_query_out)
@@ -569,7 +569,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
             include_sources=[[]],
             include_destinations=[[app_filter, env_filter]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
-            max_results=MCP_BUG_MAX_RESULTS,
+            max_results=MCP_QUERY_MAX_RESULTS,
             query_name='coverage-inbound'
         )
         inbound_flows = pce.get_traffic_flows_async(query_name='coverage-inbound', traffic_query=traffic_query)
@@ -581,7 +581,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
             include_sources=[[app_filter, env_filter]],
             include_destinations=[[]],
             policy_decisions=["allowed", "potentially_blocked", "blocked"],
-            max_results=MCP_BUG_MAX_RESULTS,
+            max_results=MCP_QUERY_MAX_RESULTS,
             query_name='coverage-outbound'
         )
         outbound_flows = pce.get_traffic_flows_async(query_name='coverage-outbound', traffic_query=traffic_query_out)
