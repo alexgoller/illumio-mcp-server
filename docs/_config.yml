@@ -12,6 +12,12 @@ plugins:
 exclude:
   - superpowers/
   - README.md
+  # Point-in-time security review. Several findings are not yet remediated
+  # (rate limiting, security headers, Cache-Control, SSRF guard on pce_host),
+  # and this is a server people self-deploy -- publishing exploitation detail
+  # for live issues is a maintainer decision, not a default. Remove this line
+  # to publish it once the findings are closed.
+  - security/2026-05-13-security-review.md
 
 color_scheme: dark
 search_enabled: true

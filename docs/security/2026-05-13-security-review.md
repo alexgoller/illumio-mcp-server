@@ -87,7 +87,7 @@ No pre-auth bypass or mass-data-exfiltration paths were found. The authz order (
       iss=html.escape(user.iss),
   ))
   ```
-  Also switch the template to use `{% ... %}` style with a proper templating engine (Jinja2 auto-escapes by default), or replace `.format()` with manual string construction using `html.escape`.
+  Also switch the template to use {% raw %}`{% ... %}`{% endraw %} style with a proper templating engine (Jinja2 auto-escapes by default), or replace `.format()` with manual string construction using `html.escape`.
 - **Effort:** Trivial
 
 ---
