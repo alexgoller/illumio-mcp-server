@@ -22,6 +22,63 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.6.0] — 2026-09-18
+
+### Security
+
+Closes the four findings left open by the 2026-05-13 review.
+
+- **Security headers on every response** — `Content-Security-Policy:
+  default-src 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options`,
+  `Referrer-Policy: no-referrer`.
+- **`Cache-Control: no-store` on `/setup` and `/confirm`.** `/confirm` returns a
+  single-use token with a 120s TTL; a shared browser profile or proxy that
+  cached it could replay it inside that window.
+- **Per-subject rate limiting** — `/confirm` 10/min, `/mcp` 60/min, tunable via
+  `MCP_RATE_LIMIT_CONFIRM` / `MCP_RATE_LIMIT_MCP`. Keyed by JWT `sub`, not IP:
+  a whole office behind one NAT shares an IP. *Per-process, so N workers means
+  N× the ceiling — exact for the single-process Docker image.*
+- **SSRF guard on `pce_host`**, plus `register-pce-credentials` restricted from
+  ALL_ROLES to operator/admin. Blocks loopback, link-local (cloud metadata at
+  `169.254.169.254` is the real target), unspecified, multicast and reserved.
+  **Deliberately allows RFC1918**: an on-prem PCE lives there by design, and the
+  review's "block private ranges" advice would break most real deployments.
+  `MCP_ALLOWED_PCE_HOSTS` gives a strict allowlist where that is wanted.
+- Also **`X-Request-Id` sanitised** — the last MEDIUM. Hostile values are
+  discarded for a fresh UUID; clean ones survive for correlation.
+
+Not closed: DNS rebinding. Addresses are validated at registration; a name that
+resolves differently later is not caught. Fixing it needs pinning the resolved
+address, which the Illumio SDK does not expose. Use the allowlist where it
+matters.
+
+### Changed
+
+- **Destination attribution: 4 providers / 30 ranges → 13 / 2,869.** Microsoft
+  365 split by service area (Exchange, SharePoint, Skype), selected AWS services
+  (S3, CloudFront, API Gateway), and Google Cloud. All `ambiguous`: shared
+  infrastructure identifies a platform, never a tenant.
+- **Lookup is now longest-prefix over prefix-length buckets, not a linear scan.**
+  Measured: the scan cost 36 ms per 8,000-row summary at 30 ranges and projected
+  to ~6 seconds at 5,000. The matcher does 2,869 ranges in 22 ms — faster than
+  the old table 95× smaller.
+
+### Unlearn
+
+- **Overlapping ranges are now correct, not a bug.** `20.20.32.0/19` (Microsoft
+  365) beats `20.0.0.0/8` (Azure), so a destination inside both reports the more
+  specific claim. The old "no overlaps" rule was only valid while lookup was a
+  linear scan; three tests asserting it were replaced.
+- **`register-pce-credentials` now needs operator or admin.** A reader account
+  can no longer make the server connect to a host it chooses.
+- **Stored `pce_host` is normalised** — `https://pce.example:8443` is stored as
+  `pce.example`, matching what the Illumio SDK actually dials, so status now
+  reports the host the server will really connect to.
+- **`/confirm` and `/mcp` can return 429** with `Retry-After`. Honour it rather
+  than retrying immediately.
+
+---
+
 ## [0.5.0] — 2026-09-17
 
 ### Changed

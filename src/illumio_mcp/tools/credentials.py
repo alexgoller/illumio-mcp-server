@@ -12,6 +12,7 @@ from typing import Any
 import mcp.types as types
 
 from ..pce import PCECredentials
+from ..pce_host_guard import validate_pce_host, PCEHostRejected
 
 logger = logging.getLogger("illumio_mcp")
 
@@ -42,9 +43,17 @@ def handle_register_pce_credentials(ctx, arguments: dict) -> list:
         return _err("Cannot register credentials in stdio mode (no user identity).")
     sub, iss = ident
 
+    # The server connects to whatever host lands here, so an unvalidated value
+    # is authenticated SSRF -- cloud metadata, internal APIs, anything the
+    # server can reach. Validated before the credentials are even constructed.
+    try:
+        safe_host = validate_pce_host(str(arguments.get("pce_host", "")))
+    except PCEHostRejected as e:
+        return _err(str(e))
+
     try:
         creds = PCECredentials(
-            host=str(arguments["pce_host"]),
+            host=safe_host,
             port=int(arguments["pce_port"]),
             org_id=int(arguments["pce_org_id"]),
             api_key=str(arguments["api_key"]),

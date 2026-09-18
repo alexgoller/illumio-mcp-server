@@ -70,13 +70,26 @@ def test_provenance_is_recorded(table):
         assert entry.get("source")
 
 
-def test_no_overlap_between_providers(table):
-    nets = [(e["provider"], ipaddress.ip_network(c))
-            for e in table["entries"] for c in e["cidrs"]]
-    for i, (p1, a) in enumerate(nets):
-        for p2, b in nets[i + 1:]:
-            if p1 != p2:
-                assert not a.overlaps(b), f"{p1} {a} overlaps {p2} {b}"
+def test_identical_ranges_are_not_claimed_twice(table):
+    """Overlap is fine and expected -- lookup is longest-prefix, so Microsoft
+    365's /19 correctly beats the coarse Azure /8 containing it. What has no
+    winner is two providers claiming the SAME range."""
+    seen = {}
+    for entry in table["entries"]:
+        for cidr in entry["cidrs"]:
+            net = ipaddress.ip_network(cidr)
+            owner = seen.setdefault(net, entry["provider"])
+            assert owner == entry["provider"], (
+                f"{net} claimed by both {owner} and {entry['provider']}"
+            )
+
+
+def test_overlaps_resolve_to_the_more_specific_provider(table):
+    """The behaviour that replaced the no-overlap rule."""
+    from illumio_mcp.ip_match import PrefixMatcher
+    m = PrefixMatcher([("20.0.0.0/8", "broad"), ("20.20.32.0/19", "specific")])
+    assert m.lookup("20.20.32.5") == "specific"
+    assert m.lookup("20.99.1.1") == "broad"
 
 
 # ----- refresh guards -----
@@ -93,14 +106,29 @@ def test_validate_rejects_a_disappearing_provider(refresh):
     assert any("cloudflare-fronted" in p and "disappeared" in p for p in problems)
 
 
-def test_validate_rejects_overlapping_providers(refresh):
+def test_validate_allows_nested_ranges_from_different_providers(refresh):
+    """Nesting is how Microsoft 365's /19 lives inside the coarse Azure /8.
+    Longest-prefix picks the specific one, which is the desired answer, so this
+    must NOT be reported as a problem."""
     problems = []
     refresh._validate(
         [{"provider": "a", "cidrs": ["10.0.0.0/8"]},
          {"provider": "b", "cidrs": ["10.1.0.0/16"]}],
         None, problems,
     )
-    assert any("overlap" in p for p in problems)
+    assert problems == []
+
+
+def test_validate_rejects_identical_ranges_from_two_providers(refresh):
+    """No 'more specific' exists here, so the answer depends on insertion
+    order -- the one overlap case that really is ambiguous."""
+    problems = []
+    refresh._validate(
+        [{"provider": "a", "cidrs": ["10.0.0.0/8"]},
+         {"provider": "b", "cidrs": ["10.0.0.0/8"]}],
+        None, problems,
+    )
+    assert any("claimed by both" in p for p in problems)
 
 
 def test_validate_raises_on_malformed_cidr(refresh):

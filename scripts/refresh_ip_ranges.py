@@ -90,6 +90,116 @@ STATIC_ENTRIES = [
 ]
 
 
+
+# SaaS and cloud providers that publish machine-readable ranges.
+#
+# Chosen for what they let a segmentation question be ANSWERED with, and sized
+# deliberately. Microsoft 365 is 93 prefixes and already split by service area,
+# so "this workload talks to Exchange Online" is one lookup. AWS publishes
+# 17,521 prefixes across 28 services -- bundling all of it would be 2.7 MB of
+# package data to say "this is AWS", which answers nothing -- so only the
+# service-specific subsets worth naming are taken.
+#
+# Everything here is `ambiguous`: shared infrastructure identifies a PLATFORM,
+# never a tenant. "This went to CloudFront" does not name whose CloudFront.
+JSON_SOURCES = [
+    {
+        "provider_prefix": "microsoft365",
+        "confidence": "ambiguous",
+        "url": "https://endpoints.office.com/endpoints/worldwide?clientrequestid=b10c5ed1-bad1-445f-b386-b919946339a7",
+        "format": "o365",
+        # Service areas are kept separate: Exchange vs SharePoint vs Teams is
+        # exactly the distinction that makes an egress report actionable.
+        "split_key": "serviceArea",
+    },
+    {
+        "provider_prefix": "aws",
+        "confidence": "ambiguous",
+        "url": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+        "format": "aws",
+        # Named services only. AMAZON and EC2 are 7,800 prefixes that mean
+        # "somewhere in AWS", which is not worth the bytes.
+        "services": ["CLOUDFRONT", "S3", "API_GATEWAY", "ROUTE53_HEALTHCHECKS"],
+    },
+    {
+        "provider_prefix": "google-cloud",
+        "confidence": "ambiguous",
+        "url": "https://www.gstatic.com/ipranges/cloud.json",
+        "format": "gcp",
+    },
+]
+
+MAX_PREFIXES_PER_SOURCE = 3000
+
+
+def collect_json_source(spec: dict, problems: list) -> list[dict]:
+    """Fetch one published JSON range file and split it into entries."""
+    try:
+        body = json.loads(_fetch(spec["url"]))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError) as e:
+        problems.append(f"{spec['provider_prefix']}: fetch failed: {e}")
+        return []
+
+    groups: dict[str, set] = {}
+    fmt = spec["format"]
+
+    if fmt == "o365":
+        for entry in body:
+            area = (entry.get(spec["split_key"]) or "common").lower()
+            for cidr in entry.get("ips") or []:
+                groups.setdefault(area, set()).add(cidr)
+    elif fmt == "aws":
+        wanted = set(spec["services"])
+        for key, field in (("prefixes", "ip_prefix"), ("ipv6_prefixes", "ipv6_prefix")):
+            for item in body.get(key) or []:
+                service = item.get("service")
+                if service in wanted and item.get(field):
+                    groups.setdefault(service.lower(), set()).add(item[field])
+    elif fmt == "gcp":
+        for item in body.get("prefixes") or []:
+            cidr = item.get("ipv4Prefix") or item.get("ipv6Prefix")
+            if cidr:
+                groups.setdefault("all", set()).add(cidr)
+    else:
+        problems.append(f"{spec['provider_prefix']}: unknown format {fmt!r}")
+        return []
+
+    entries = []
+    for name, cidrs in sorted(groups.items()):
+        provider = (spec["provider_prefix"] if name in ("all", "common")
+                    else f"{spec['provider_prefix']}-{name}")
+        valid = []
+        for cidr in sorted(cidrs, key=_cidr_sort_key_safe):
+            try:
+                ipaddress.ip_network(cidr)
+                valid.append(cidr)
+            except ValueError:
+                problems.append(f"{provider}: unparseable {cidr!r}")
+        if not valid:
+            continue
+        if len(valid) > MAX_PREFIXES_PER_SOURCE:
+            problems.append(
+                f"{provider}: {len(valid)} prefixes exceeds the "
+                f"{MAX_PREFIXES_PER_SOURCE} cap; truncated"
+            )
+            valid = valid[:MAX_PREFIXES_PER_SOURCE]
+        entries.append({
+            "provider": provider,
+            "confidence": spec["confidence"],
+            "cidrs": valid,
+            "source": "published",
+            "source_urls": [spec["url"].split("?")[0]],
+        })
+    return entries
+
+
+def _cidr_sort_key_safe(cidr: str):
+    try:
+        return _cidr_sort_key(cidr)
+    except ValueError:
+        return (9, 0, 0)
+
+
 def _fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={
         "User-Agent": USER_AGENT,
@@ -212,15 +322,25 @@ def _validate(entries: list[dict], previous: dict | None, problems: list) -> Non
         for cidr in entry["cidrs"]:
             ipaddress.ip_network(cidr)  # raises on malformed
 
-    nets = [(e["provider"], ipaddress.ip_network(c))
-            for e in entries for c in e["cidrs"]]
-    for i, (p1, a) in enumerate(nets):
-        for p2, b in nets[i + 1:]:
-            if p1 != p2 and a.overlaps(b):
+    # Overlap between providers is EXPECTED now and is not a problem: lookup is
+    # longest-prefix-match, so Microsoft 365's 20.20.32.0/19 correctly beats the
+    # coarse azure-hosted 20.0.0.0/8 containing it. That is the desired answer --
+    # the more specific claim wins.
+    #
+    # What is genuinely ambiguous is two providers claiming the IDENTICAL range,
+    # where there is no "more specific" to prefer and the result depends on
+    # insertion order.
+    seen: dict = {}
+    for entry in entries:
+        for cidr in entry["cidrs"]:
+            net = ipaddress.ip_network(cidr)
+            owner = seen.get(net)
+            if owner is not None and owner != entry["provider"]:
                 problems.append(
-                    f"overlap between {p1} {a} and {p2} {b} -- attribution would "
-                    f"depend on table order"
+                    f"{net} is claimed by both {owner} and {entry['provider']} -- "
+                    f"identical ranges have no longest-prefix winner"
                 )
+            seen.setdefault(net, entry["provider"])
 
     if previous:
         had = {e["provider"] for e in previous.get("entries", [])}
@@ -239,6 +359,8 @@ def build(problems: list, previous: dict | None) -> dict:
         entry = collect_published(spec, problems)
         if entry:
             entries.append(entry)
+    for spec in JSON_SOURCES:
+        entries.extend(collect_json_source(spec, problems))
     for spec in STATIC_ENTRIES:
         entries.append({**spec, "cidrs": sorted(spec["cidrs"], key=_cidr_sort_key)})
 

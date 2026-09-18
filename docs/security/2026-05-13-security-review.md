@@ -6,6 +6,16 @@ parent: Security
 
 # Security Review: illumio-mcp-server v0.2.0
 
+> **Status (2026-09-18):** every finding below is now **resolved**. Fixed in
+> 0.6.0: rate limiting, HTTP security headers, `Cache-Control: no-store`, the
+> SSRF guard on `pce_host`, and `X-Request-Id` sanitisation. Fixed earlier:
+> credential logging, the stored XSS, request body limits, and `used_jti`
+> growth. One residual is documented rather than closed — DNS rebinding against
+> `pce_host`; see `MCP_ALLOWED_PCE_HOSTS`.
+>
+> Findings are kept verbatim as the record of what was found and when.
+
+
 **Scope:** External-facing HTTP + auth + crypto + persistence surfaces (transport/*, auth/*, server.py dispatcher, tools/credentials.py).
 **Date:** 2026-05-13
 **Reviewer:** Adversarial code inspection (static analysis; no runtime fuzzing; no dependency scan via pip-audit)

@@ -212,7 +212,10 @@ async def test_register_then_call_succeeds(http_server, private_key_pem):
             status2 = await session.call_tool("check-pce-credentials-status", {})
             status2_body = json.loads(status2.content[0].text)
             assert status2_body["registered"] is True
-            assert status2_body["pce_host"] == "https://pce.example"
+            # Stored normalised, matching what PolicyComputeEngine actually dials:
+            # the SDK strips scheme and port identically, so status now reports
+            # exactly the host the server will connect to.
+            assert status2_body["pce_host"] == "pce.example"
 
 
 async def test_setup_page_get_returns_html(http_server, private_key_pem):
