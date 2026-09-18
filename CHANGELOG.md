@@ -22,6 +22,36 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.8.0] — 2026-09-18
+
+### Added
+
+- **Destination attribution covers common SaaS**: Salesforce, Workday, Zoom,
+  Google services (Gmail/Workspace), Microsoft 365 by service area, GitHub,
+  Atlassian, Dropbox and Box — 21 providers, 3,412 ranges, up from 13/2,869.
+  Every range comes from the vendor's own published list or from RDAP.
+
+### Changed
+
+- `google-hosted` (three hand-written guesses) replaced by Google's published
+  `goog.json`, split as **`google-services`** (Gmail, Workspace, Search) versus
+  **`google-cloud`** (GCP customer ranges) — Google's own documented subtraction.
+- GitHub is one provider, not one per endpoint key: web, git and api are served
+  from the same ranges, so splitting them implied a separation that does not
+  exist.
+
+### Unlearn
+
+- **`8.8.8.8` now reports `google-services`**, not unknown. Google publishes
+  `8.8.8.0/24`; the address was never anonymous, the table was just smaller.
+- **`google-hosted` no longer exists** — use `google-services` or `google-cloud`.
+- **An empty attribution means "not attributable", never "no traffic".** Slack,
+  Zendesk, DocuSign and ServiceNow do not own the addresses they answer on —
+  they resolve into AWS, Cloudflare, Microsoft and Akamai respectively. No range
+  file can fix that; it needs TLS SNI or DNS logs, which flow data lacks.
+
+---
+
 ## [0.7.0] — 2026-09-18
 
 ### Fixed

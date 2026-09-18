@@ -51,17 +51,40 @@ def test_confidence_is_constrained(table):
         assert entry["confidence"] in ("likely", "ambiguous")
 
 
-def test_only_registry_backed_entries_claim_a_vendor(table):
-    """`likely` asserts vendor ownership, so it must be backed by RDAP rather
-    than by someone's memory. The hand-written table claimed `likely` for three
-    ranges RDAP shows registered to Microsoft."""
+# Address space that identifies a PLATFORM rather than a tenant. None of these
+# may ever claim `likely`, whoever publishes the list.
+SHARED_INFRASTRUCTURE = {
+    "cloudflare-fronted", "fastly", "azure-hosted", "google-cloud",
+    "google-services", "microsoft365", "microsoft365-exchange",
+    "microsoft365-sharepoint", "microsoft365-skype",
+}
+
+
+def test_likely_entries_have_real_provenance(table):
+    """`likely` asserts vendor ownership, so it needs a source -- RDAP, or the
+    vendor's own published range file. It must never rest on someone's memory:
+    the original hand-written table claimed `likely` for three ranges RDAP shows
+    registered to Microsoft."""
     for entry in table["entries"]:
-        if entry["confidence"] == "likely":
-            assert entry["source"] == "rdap", (
-                f"{entry['provider']} claims vendor ownership without registry "
-                f"backing (source={entry['source']})"
+        if entry["confidence"] != "likely":
+            continue
+        if entry["source"] == "rdap":
+            assert entry.get("registrant"), f"{entry['provider']}: no registrant"
+        else:
+            assert entry["source"] == "published", entry["provider"]
+            assert entry.get("source_urls"), (
+                f"{entry['provider']} claims vendor ownership with no source URL"
             )
-            assert entry.get("registrant")
+
+
+def test_shared_infrastructure_never_claims_a_vendor(table):
+    """A CDN or cloud range identifies the platform, never whose tenant it is."""
+    for entry in table["entries"]:
+        if entry["provider"] in SHARED_INFRASTRUCTURE or entry["provider"].startswith("aws-"):
+            assert entry["confidence"] == "ambiguous", (
+                f"{entry['provider']} must stay ambiguous: the address belongs to "
+                f"the platform, and thousands of unrelated tenants share it"
+            )
 
 
 def test_provenance_is_recorded(table):
@@ -171,3 +194,64 @@ def test_comparable_ignores_only_the_timestamp(refresh):
     c = {"generated_at": "2026-01-01T00:00:00Z", "entries": [{"provider": "y"}]}
     assert refresh._comparable(a) == refresh._comparable(b)
     assert refresh._comparable(a) != refresh._comparable(c)
+
+
+# ----- SaaS coverage: what is attributable, and what provably is not -----
+
+def test_saas_providers_are_present(table):
+    """The vendors people actually ask about, each from its own published list
+    or from RDAP."""
+    providers = {e["provider"] for e in table["entries"]}
+    for expected in ("salesforce", "workday", "zoom", "google-services",
+                     "microsoft365-exchange", "github", "atlassian",
+                     "dropbox", "box"):
+        assert expected in providers, f"{expected} missing from the table"
+
+
+def test_vendor_owned_space_is_likely_and_shared_infra_is_not():
+    """Confidence must track who owns the address, not who is popular."""
+    from illumio_mcp.tools.traffic import classify_destination
+    assert classify_destination("209.177.165.18")[1] == "likely"      # Workday's own
+    assert classify_destination("170.114.52.2")[1] == "likely"        # Zoom's own
+    for shared in ("172.66.0.243",):                                  # Cloudflare edge
+        assert classify_destination(shared)[1] == "ambiguous"
+
+
+def test_google_services_is_not_the_same_as_google_cloud(table):
+    """goog.json minus cloud.json: Gmail and Workspace, as opposed to someone's
+    VM in GCP. Keeping both unsubtracted put identical ranges in two providers,
+    the one overlap longest-prefix cannot arbitrate."""
+    by = {e["provider"]: set(e["cidrs"]) for e in table["entries"]}
+    assert "google-services" in by and "google-cloud" in by
+    assert not (by["google-services"] & by["google-cloud"])
+
+
+def test_cdn_fronted_saas_are_not_falsely_claimed(table):
+    """Slack, Zendesk, DocuSign and ServiceNow do not own the addresses they
+    answer on. Claiming them would attribute a CDN's whole tenant base to one
+    vendor."""
+    providers = {e["provider"] for e in table["entries"]}
+    for impossible in ("slack", "zendesk", "docusign", "servicenow"):
+        assert impossible not in providers, (
+            f"{impossible} is CDN-fronted; no IP range can attribute it"
+        )
+
+
+def test_github_actions_bulk_is_excluded(table):
+    """`actions` alone is ~6,500 runner-egress prefixes meaning 'a CI runner
+    phoned home', not 'someone used GitHub'. GitHub is also ONE provider, not
+    one per key: web, git and api are served from the same ranges, so splitting
+    them would imply a separation that does not exist."""
+    providers = {e["provider"] for e in table["entries"]}
+    assert "github-actions" not in providers
+    assert not any(p.startswith("github-") for p in providers)
+    gh = sum(len(e["cidrs"]) for e in table["entries"] if e["provider"].startswith("github"))
+    assert gh < 500, f"github ranges ballooned to {gh}"
+
+
+def test_table_stays_within_a_sane_size(table):
+    """Attribution is bundled package data; it should stay in the low
+    thousands. AWS alone publishes 17,521 prefixes, most meaning 'somewhere in
+    AWS'."""
+    total = sum(len(e["cidrs"]) for e in table["entries"])
+    assert total < 8000, f"{total} ranges is more than this should carry"
