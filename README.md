@@ -2,6 +2,15 @@
 
 # Illumio MCP Server
 
+[![CI](https://github.com/alexgoller/illumio-mcp-server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alexgoller/illumio-mcp-server/actions/workflows/ci.yml)
+[![Docker](https://github.com/alexgoller/illumio-mcp-server/actions/workflows/docker-release.yml/badge.svg?branch=main)](https://github.com/alexgoller/illumio-mcp-server/actions/workflows/docker-release.yml)
+[![IP ranges](https://github.com/alexgoller/illumio-mcp-server/actions/workflows/refresh-ip-ranges.yml/badge.svg)](https://github.com/alexgoller/illumio-mcp-server/actions/workflows/refresh-ip-ranges.yml)
+[![Docs](https://img.shields.io/badge/docs-github%20pages-blue)](https://alexgoller.github.io/illumio-mcp-server)
+
+[![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue?logo=python&logoColor=white)](https://github.com/alexgoller/illumio-mcp-server/blob/main/pyproject.toml)
+[![MCP](https://img.shields.io/badge/MCP-50%20tools-5b3df5)](https://alexgoller.github.io/illumio-mcp-server/tools.html)
+[![License](https://img.shields.io/badge/license-GPL--3.0-green)](https://github.com/alexgoller/illumio-mcp-server/blob/main/LICENSE)
+
 **📚 [Documentation site](https://alexgoller.github.io/illumio-mcp-server)** — installation, getting started, workflows, the full tool reference, and central deployment.
 
 A Model Context Protocol (MCP) server that provides an interface to interact with Illumio PCE (Policy Compute Engine). This server enables programmatic access to Illumio workload management, label operations, traffic flow analysis, automated ringfencing, and infrastructure service identification.
