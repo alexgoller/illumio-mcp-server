@@ -13,7 +13,7 @@ nav_order: 4
 ---
 
 The server ships three **MCP prompts** — guided, multi-step workflows that sequence the
-underlying tools for a task, so you don't have to drive 46 tools by hand. In Claude
+underlying tools for a task, so you don't have to drive 50 tools by hand. In Claude
 Desktop they appear in the prompt picker (the `+` menu); other clients expose them via
 `prompts/list`.
 
