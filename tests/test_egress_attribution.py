@@ -31,8 +31,11 @@ def test_cloudflare_fronted_is_not_claimed_as_a_vendor():
     assert provider not in ("anthropic", "openai")
 
 
-@pytest.mark.parametrize("ip", ["10.0.0.1", "192.168.1.10", "8.8.8.8"])
+@pytest.mark.parametrize("ip", ["10.0.0.1", "192.168.1.10", "192.0.2.1"])
 def test_unknown_destinations_are_not_guessed(ip):
+    """8.8.8.8 used to be here as 'obviously unknown'. Google publishes
+    8.8.8.0/24 in goog.json, so it now correctly resolves to google-services --
+    the address was never anonymous, the table was just smaller."""
     assert classify_destination(ip) == (None, None)
 
 

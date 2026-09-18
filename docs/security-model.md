@@ -65,16 +65,43 @@ topology in detail, and the log is long-lived on disk.
 
 ## Known gaps
 
-Honest list, current as of the latest review:
+Verified against the code on 2026-09-18, not copied forward from the last review.
 
 | Gap | Status |
 |---|---|
-| No request-rate limiting | Open |
-| No `Cache-Control: no-store` on `/setup` and `/confirm` | Open |
-| `X-Request-Id` accepted from the client unsanitised | Open |
-| `jti` table grows unboundedly (`purge_expired` never called) | Open |
-| Confirmation gate does not prove *human* intent | By design today; see note above |
-| Public bind and authentication are mutually exclusive | See [Central deployment](deployment/central) |
+| No request-rate limiting | **Closed** in 0.6.0 — per-subject token bucket, `/confirm` 10/min, `/mcp` 60/min |
+| No `Cache-Control: no-store` on `/setup` and `/confirm` | **Closed** in 0.6.0 |
+| `X-Request-Id` accepted from the client unsanitised | **Closed** in 0.6.0 — hostile values discarded for a fresh UUID |
+| Missing HTTP security headers | **Closed** in 0.6.0 — CSP, `X-Frame-Options`, nosniff, `Referrer-Policy` |
+| SSRF via user-supplied `pce_host` | **Closed** in 0.6.0 — see below for what is deliberately still allowed |
+| `jti` table grows unboundedly (`purge_expired` never called) | **Closed** in 0.7.0 — the method existed with no callers; now runs opportunistically on write |
+| Public bind and authentication mutually exclusive | **Closed** in 0.7.0 — the guard was inverted; see below |
+| Confirmation gate does not prove *human* intent | **Open, by design today** — see the note above |
+| DNS rebinding against `pce_host` | **Open** — addresses are validated at registration; a name that resolves differently later is not caught |
+| Rate limiting is per-process | **Open by design** — N workers multiply the ceiling; exact for the single-process image |
+
+### The bind guard was backwards
+
+Before 0.7.0 the server refused any non-loopback bind unless `MCP_DEV_INSECURE=1`
+— and that flag is precisely what turns authentication off. The only way to
+serve a network interface was therefore to serve it **unauthenticated**, which
+made the whole OAuth, keystore, RBAC and confirm stack unreachable in exactly
+the deployment it exists for.
+
+It now works the way round it always should have:
+
+| Bind | Auth configured | Result |
+|---|---|---|
+| `127.0.0.1` | either | allowed |
+| `0.0.0.0` | yes | **allowed** — the production case |
+| `0.0.0.0` | no (`MCP_DEV_INSECURE=1`) | **refused** — the genuinely dangerous combination |
+
+### What the SSRF guard deliberately allows
+
+RFC1918 addresses are accepted, because an on-prem PCE lives there by design and
+a guard that breaks the normal deployment gets switched off. Blocked: loopback,
+link-local (cloud instance metadata), unspecified, multicast and reserved. Set
+`MCP_ALLOWED_PCE_HOSTS` for a strict allowlist.
 
 Request body size is capped at 4 MiB by the MCP SDK. Dependencies are checked against OSV
 and currently carry no known advisories.

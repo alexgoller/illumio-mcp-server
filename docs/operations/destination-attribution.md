@@ -38,29 +38,72 @@ hostname resolution, correlate with DNS server or proxy logs.
 
 ---
 
-## Confidence tiers
+## What it can identify
 
-Every attribution carries a `provider_confidence`. Treat only `likely` as
-identification.
+21 providers, 3,412 ranges, all from each vendor's own
+published list or from RDAP. Lookup is longest-prefix, so a specific service
+range beats the broad cloud range containing it.
 
-| Confidence | Meaning | Example |
-|---|---|---|
-| `likely` | Range is registered to the vendor. Backed by RDAP. | `anthropic` — `160.79.104.0/21`, registrant Anthropic, PBC |
-| `ambiguous` | Shared infrastructure. Narrows the field, names no vendor. | `cloudflare-fronted`, `azure-hosted`, `google-hosted` |
+| Provider | Confidence | Ranges | Source |
+|---|---|---|---|
+| `anthropic` | likely | 1 | rdap |
+| `atlassian` | likely | 166 | published |
+| `box` | likely | 1 | rdap |
+| `dropbox` | likely | 1 | rdap |
+| `github` | likely | 108 | published |
+| `salesforce` | likely | 61 | published |
+| `workday` | likely | 1 | rdap |
+| `zoom` | likely | 49 | published |
+| `aws-api_gateway` | ambiguous | 214 | published |
+| `aws-cloudfront` | ambiguous | 243 | published |
+| `aws-route53_healthchecks` | ambiguous | 57 | published |
+| `aws-s3` | ambiguous | 1129 | published |
+| `azure-hosted` | ambiguous | 4 | curated:coarse-cloud |
+| `cloudflare-fronted` | ambiguous | 22 | published |
+| `fastly` | ambiguous | 21 | published |
+| `google-cloud` | ambiguous | 1103 | published |
+| `google-services` | ambiguous | 138 | published |
+| `microsoft365` | ambiguous | 40 | published |
+| `microsoft365-exchange` | ambiguous | 34 | published |
+| `microsoft365-sharepoint` | ambiguous | 10 | published |
+| `microsoft365-skype` | ambiguous | 9 | published |
 
-`ambiguous` exists because the alternative manufactures false positives.
-`20.0.0.0/8` is the whole of Azure — reporting it as an AI provider would tag
-every Azure-hosted business application in the estate as shadow AI. Anthropic
-and OpenAI both front on Cloudflare, so a Cloudflare hit cannot name either.
+Verified by resolving each vendor's well-known hostname and classifying the
+result:
 
-A worked example of what this prevents: three ranges once shipped as provider
-`openai` with `likely` confidence. RDAP shows `23.102.140.112/28` registered to
-**Microsoft Corporation** — they are OpenAI's Azure-hosted endpoints, which
-other Azure tenants can share. They are now reported as `azure-hosted` /
-`ambiguous`, which is what the registry actually supports.
+| Destination | Reports as |
+|---|---|
+| `gmail.com`, `drive.google.com` | `google-services` |
+| `outlook.office365.com` | `microsoft365-exchange` |
+| `login.salesforce.com` | `salesforce` |
+| `zoom.us` | `zoom` |
+| `github.com` | `github` |
+| `www.myworkday.com` | `workday` |
 
 ---
 
+## What it cannot identify, and why
+
+Some SaaS cannot be attributed by IP **at all**, because they do not own the
+addresses they answer on. Checked by RDAP:
+
+| SaaS | Resolves into | So it reports as |
+|---|---|---|
+| Slack | Amazon | `aws-*` or nothing |
+| Zendesk | Cloudflare | `cloudflare-fronted` |
+| DocuSign | Microsoft | `azure-hosted` |
+| ServiceNow | Akamai | nothing |
+
+This is a property of their hosting, not a gap in the table. No range file can
+fix it: the address belongs to the CDN, and thousands of unrelated tenants
+answer on the same one. Distinguishing them needs TLS SNI or DNS logs, which
+Illumio flow data does not carry.
+
+**So an empty result means "not attributable", never "no traffic".**
+
+---
+
+## Confidence tiers
 ## Where the data comes from
 
 The server performs **no network I/O for attribution**. It reads

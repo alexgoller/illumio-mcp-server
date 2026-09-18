@@ -24,17 +24,27 @@ A Model Context Protocol (MCP) server that provides an interface to interact wit
 Use conversational AI to talk to your PCE:
 
 - **Full CRUD** on workloads, labels, IP lists, services, and rulesets
-- **Traffic analysis** — query flows, get summaries, filter by policy decision
+- **Traffic analysis over the whole window** — summaries aggregate every flow the
+  PCE returns, not the first 500, and report how much exists vs how much is shown
+- **Aggregate on any label** — `app`/`env` by default, or business unit,
+  compliance scope, role+location; whatever dimensions your PCE defines
+- **Shadow-AI / egress discovery** — which process talks to which provider, with
+  attribution from RDAP and vendor-published ranges refreshed weekly in CI
+- **Process-qualified policy** — "only this binary may reach that app", via
+  Windows egress services and service references in rules
 - **Automated ringfencing** — analyze traffic and create app-to-app segmentation policies with one command
 - **Selective enforcement** — add deny rules for apps in selective mode with configurable consumer flavors
 - **Infrastructure service identification** — discover which apps are infrastructure services using graph centrality analysis, so you know what to policy first
 - **Deny rule management** — create, update, and delete deny rules (including override deny for emergencies)
+- **Rules editable in place** — `update-sec-rule` / `delete-sec-rule` instead of rebuilding a ruleset
 - **Event monitoring** — query PCE events with severity and type filters
 - **PCE health checks** — verify connectivity and credentials
+- **Tells you when it changed** — `get-server-changelog` reports behaviour changes
+  to a session whose cached tool list is stale
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.12 or 3.13 (see `requires-python` in `pyproject.toml`)
 - Access to an Illumio PCE instance
 - Valid API credentials for the PCE
 

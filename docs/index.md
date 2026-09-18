@@ -27,7 +27,7 @@ through the PCE API on your behalf.
 
 | | |
 |---|---|
-| **46 tools** | Full CRUD on workloads, labels, IP lists, services, rulesets and deny rules, plus traffic analysis, ringfencing, compliance checks and policy provisioning. [Reference →](tools) |
+| **50 tools** | Full CRUD on workloads, labels, IP lists, services, rulesets and deny rules, plus traffic analysis, ringfencing, compliance checks and policy provisioning. [Reference →](tools) |
 | **3 guided workflows** | Multi-step prompts for ringfencing, traffic analysis and emergency isolation. [Workflows →](workflows) |
 | **20 knowledge resources** | An embedded segmentation knowledge base — rule processing order, enforcement modes, PCI-DSS/HIPAA/DORA/NIST mappings, ringfencing patterns. [Resources →](resources) |
 | **2 transports** | `stdio` for a laptop, or HTTP with OAuth for a team. [Deployment →](deployment/central) |

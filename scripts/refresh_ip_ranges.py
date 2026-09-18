@@ -56,6 +56,22 @@ TIMEOUT = 30
 RDAP_SEEDS = [
     {"provider": "anthropic", "confidence": "likely",
      "expect_org": "Anthropic", "seeds": ["160.79.104.100"]},
+
+    # SaaS that own their address space but publish no range file. RDAP is the
+    # authority here, and `expect_org` means a reassigned block fails loudly
+    # rather than quietly attributing someone else's traffic to them.
+    #
+    # Seeds are addresses their well-known hostnames resolve to. Vendors NOT
+    # listed here were checked and are CDN-fronted -- ServiceNow resolves into
+    # Akamai, Slack and Atlassian into AWS, Zendesk into Cloudflare, DocuSign
+    # into Microsoft -- so no IP range can attribute them. That is a property of
+    # their hosting, not a gap in this list.
+    {"provider": "workday", "confidence": "likely",
+     "expect_org": "Workday", "seeds": ["209.177.165.18"]},
+    {"provider": "dropbox", "confidence": "likely",
+     "expect_org": "Dropbox", "seeds": ["162.125.66.18"]},
+    {"provider": "box", "confidence": "likely",
+     "expect_org": "Box", "seeds": ["74.112.186.157"]},
 ]
 
 # Shared infrastructure that publishes its own ranges. A hit here narrows the
@@ -84,9 +100,8 @@ STATIC_ENTRIES = [
      "cidrs": ["20.0.0.0/8", "23.102.140.112/28", "13.66.11.96/28",
                "104.210.133.240/28"],
      "source": "curated:coarse-cloud"},
-    {"provider": "google-hosted", "confidence": "ambiguous",
-     "cidrs": ["142.250.0.0/15", "172.217.0.0/16", "216.58.192.0/19"],
-     "source": "curated:coarse-cloud"},
+    # google-hosted was three hand-written guesses. Google publishes goog.json,
+    # so the curated entry is now strictly worse data and has been dropped.
 ]
 
 
@@ -127,6 +142,55 @@ JSON_SOURCES = [
         "url": "https://www.gstatic.com/ipranges/cloud.json",
         "format": "gcp",
     },
+
+    # --- SaaS, from each vendor's own published list -----------------------
+    #
+    # Surveyed before choosing: resolving each vendor's well-known hostname and
+    # RDAP-ing the result shows which of them actually own IP space. Zoom
+    # (170.114.0.0/16), Dropbox, Box and Salesforce do. Slack and Atlassian
+    # resolve into Amazon, Zendesk into Cloudflare, DocuSign into Microsoft --
+    # those are NOT attributable by address, and nothing here pretends
+    # otherwise. See docs/operations/destination-attribution.md.
+    {
+        "provider_prefix": "salesforce",
+        "confidence": "likely",          # vendor-published, vendor-owned space
+        "url": "https://ip-ranges.salesforce.com/ip-ranges.json",
+        "format": "aws",                 # Salesforce serves the AWS schema
+        "services": None,                # take everything; it is only ~44
+    },
+    {
+        "provider_prefix": "google",
+        "confidence": "ambiguous",       # all of Google, not a named service
+        "url": "https://www.gstatic.com/ipranges/goog.json",
+        "format": "gcp",
+    },
+    {
+        "provider_prefix": "zoom",
+        "confidence": "likely",
+        "url": "https://assets.zoom.us/docs/ipranges/Zoom.txt",
+        "format": "lines",
+    },
+    {
+        "provider_prefix": "atlassian",
+        "confidence": "likely",          # published BY Atlassian, even though
+        "url": "https://ip-ranges.atlassian.com/",   # much of it sits in AWS
+        "format": "atlassian",
+    },
+    {
+        "provider_prefix": "github",
+        "confidence": "likely",
+        "url": "https://api.github.com/meta",
+        "format": "github",
+        # web/api/git only. `actions` alone is ~6,500 runner-egress prefixes
+        # that answer "a CI runner phoned home", not "someone used GitHub".
+        "keys": ["web", "api", "git", "packages"],
+    },
+    {
+        "provider_prefix": "fastly",
+        "confidence": "ambiguous",       # a CDN: identifies the edge, not the site
+        "url": "https://api.fastly.com/public-ip-list",
+        "format": "fastly",
+    },
 ]
 
 MAX_PREFIXES_PER_SOURCE = 3000
@@ -135,7 +199,8 @@ MAX_PREFIXES_PER_SOURCE = 3000
 def collect_json_source(spec: dict, problems: list) -> list[dict]:
     """Fetch one published JSON range file and split it into entries."""
     try:
-        body = json.loads(_fetch(spec["url"]))
+        raw = _fetch(spec["url"])
+        body = raw if spec["format"] == "lines" else json.loads(raw)
     except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError) as e:
         problems.append(f"{spec['provider_prefix']}: fetch failed: {e}")
         return []
@@ -149,17 +214,49 @@ def collect_json_source(spec: dict, problems: list) -> list[dict]:
             for cidr in entry.get("ips") or []:
                 groups.setdefault(area, set()).add(cidr)
     elif fmt == "aws":
-        wanted = set(spec["services"])
+        wanted = spec.get("services")
+        wanted = set(wanted) if wanted else None     # None == take everything
         for key, field in (("prefixes", "ip_prefix"), ("ipv6_prefixes", "ipv6_prefix")):
             for item in body.get(key) or []:
-                service = item.get("service")
-                if service in wanted and item.get(field):
-                    groups.setdefault(service.lower(), set()).add(item[field])
+                service = item.get("service") or "all"
+                if wanted is not None and service not in wanted:
+                    continue
+                value = item.get(field)
+                if not value:
+                    continue
+                bucket = "all" if wanted is None else service.lower()
+                # AWS gives one CIDR per entry; Salesforce reuses the same key
+                # name for a LIST of them. Same schema on the surface, different
+                # shape underneath.
+                for cidr in ([value] if isinstance(value, str) else value):
+                    groups.setdefault(bucket, set()).add(cidr)
     elif fmt == "gcp":
         for item in body.get("prefixes") or []:
             cidr = item.get("ipv4Prefix") or item.get("ipv6Prefix")
             if cidr:
                 groups.setdefault("all", set()).add(cidr)
+    elif fmt == "lines":
+        for line in body.splitlines() if isinstance(body, str) else []:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                groups.setdefault("all", set()).add(line)
+    elif fmt == "atlassian":
+        for item in body.get("items") or []:
+            cidr = item.get("cidr")
+            if cidr:
+                groups.setdefault("all", set()).add(cidr)
+    elif fmt == "github":
+        # One bucket, not one per key. GitHub serves web, git and api from the
+        # SAME ranges -- 140.82.112.0/20 appears under all three -- so splitting
+        # them implies a separation that does not exist and puts the identical
+        # range in three providers. Microsoft 365's areas genuinely differ;
+        # GitHub's do not.
+        for key in spec.get("keys") or []:
+            for cidr in body.get(key) or []:
+                groups.setdefault("all", set()).add(cidr)
+    elif fmt == "fastly":
+        for cidr in (body.get("addresses") or []) + (body.get("ipv6_addresses") or []):
+            groups.setdefault("all", set()).add(cidr)
     else:
         problems.append(f"{spec['provider_prefix']}: unknown format {fmt!r}")
         return []
@@ -192,6 +289,29 @@ def collect_json_source(spec: dict, problems: list) -> list[dict]:
         })
     return entries
 
+
+
+def _split_google_services(entries: list[dict]) -> list[dict]:
+    """Turn "all of Google" into "Google's own services".
+
+    goog.json is every Google netblock; cloud.json is the GCP customer subset.
+    Google documents the difference as goog minus cloud, and that difference is
+    the useful one here: Gmail, Workspace and Search, as opposed to "someone's
+    VM in GCP". Leaving both in produced identical ranges in two providers,
+    which is the one overlap longest-prefix cannot arbitrate.
+    """
+    google = next((e for e in entries if e["provider"] == "google"), None)
+    cloud = next((e for e in entries if e["provider"] == "google-cloud"), None)
+    if google is None or cloud is None:
+        return entries
+    cloud_set = set(cloud["cidrs"])
+    remaining = [c for c in google["cidrs"] if c not in cloud_set]
+    if not remaining:
+        return [e for e in entries if e is not google]
+    google["cidrs"] = remaining
+    google["provider"] = "google-services"
+    google["note"] = "goog.json minus cloud.json: Google's own services, not GCP"
+    return entries
 
 def _cidr_sort_key_safe(cidr: str):
     try:
@@ -335,7 +455,11 @@ def _validate(entries: list[dict], previous: dict | None, problems: list) -> Non
         for cidr in entry["cidrs"]:
             net = ipaddress.ip_network(cidr)
             owner = seen.get(net)
-            if owner is not None and owner != entry["provider"]:
+            # Same vendor, different facet: GitHub lists one IPv6 range under
+            # both `api` and `web`. Either answer names GitHub, so there is
+            # nothing to arbitrate -- only a cross-VENDOR collision matters.
+            same_vendor = (owner or "").split("-")[0] == entry["provider"].split("-")[0]
+            if owner is not None and owner != entry["provider"] and not same_vendor:
                 problems.append(
                     f"{net} is claimed by both {owner} and {entry['provider']} -- "
                     f"identical ranges have no longest-prefix winner"
@@ -364,6 +488,7 @@ def build(problems: list, previous: dict | None) -> dict:
     for spec in STATIC_ENTRIES:
         entries.append({**spec, "cidrs": sorted(spec["cidrs"], key=_cidr_sort_key)})
 
+    entries = _split_google_services(entries)
     entries.sort(key=lambda e: e["provider"])
     _validate(entries, previous, problems)
     return {

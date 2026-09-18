@@ -22,6 +22,71 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.8.0] — 2026-09-18
+
+### Added
+
+- **Destination attribution covers common SaaS**: Salesforce, Workday, Zoom,
+  Google services (Gmail/Workspace), Microsoft 365 by service area, GitHub,
+  Atlassian, Dropbox and Box — 21 providers, 3,412 ranges, up from 13/2,869.
+  Every range comes from the vendor's own published list or from RDAP.
+
+### Changed
+
+- `google-hosted` (three hand-written guesses) replaced by Google's published
+  `goog.json`, split as **`google-services`** (Gmail, Workspace, Search) versus
+  **`google-cloud`** (GCP customer ranges) — Google's own documented subtraction.
+- GitHub is one provider, not one per endpoint key: web, git and api are served
+  from the same ranges, so splitting them implied a separation that does not
+  exist.
+
+### Unlearn
+
+- **`8.8.8.8` now reports `google-services`**, not unknown. Google publishes
+  `8.8.8.0/24`; the address was never anonymous, the table was just smaller.
+- **`google-hosted` no longer exists** — use `google-services` or `google-cloud`.
+- **An empty attribution means "not attributable", never "no traffic".** Slack,
+  Zendesk, DocuSign and ServiceNow do not own the addresses they answer on —
+  they resolve into AWS, Cloudflare, Microsoft and Akamai respectively. No range
+  file can fix that; it needs TLS SNI or DNS logs, which flow data lacks.
+
+---
+
+## [0.7.0] — 2026-09-18
+
+### Fixed
+
+- **The public-bind guard was inverted, and it disabled the security stack.**
+  The server refused any non-loopback bind unless `MCP_DEV_INSECURE=1` — the flag
+  that turns authentication *off*. Serving a network interface therefore meant
+  serving it unauthenticated, making the entire OAuth, keystore, RBAC and confirm
+  stack unreachable in the deployment it exists for. Now: `0.0.0.0` **with** auth
+  is allowed; `0.0.0.0` with `MCP_DEV_INSECURE=1` is refused.
+- **`used_jti` really did grow forever.** `purge_expired` existed with no callers,
+  so it deleted nothing for the life of the process — one row per consumed
+  confirm token, indefinitely. Now runs opportunistically on write, rate-limited
+  to once every 5 minutes, and failure is non-fatal.
+
+### Documentation
+
+- `docs/security-model.md` "Known gaps" rewritten from **verification against the
+  code**, not carried forward. Three entries were stale (closed in 0.6.0), two
+  were genuinely open and are now fixed, and the remaining open items say why
+  they stay open.
+- README: the feature list now reflects the last week's work, and the
+  prerequisites said **Python 3.8+** where `pyproject.toml` requires `>=3.12`.
+- Tool counts corrected from 46 to 50 across the docs site.
+- First git tags and GitHub release: v0.2.0 … v0.6.0 tagged at the commits where
+  each version was actually current; v0.6.0 published as a release.
+
+### Unlearn
+
+- **`MCP_DEV_INSECURE=1` no longer permits a public bind.** If you were relying
+  on it to serve `0.0.0.0`, that combination is now refused — configure auth, or
+  bind loopback.
+
+---
+
 ## [0.6.0] — 2026-09-18
 
 ### Security

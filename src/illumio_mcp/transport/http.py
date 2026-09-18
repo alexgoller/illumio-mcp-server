@@ -148,10 +148,22 @@ def _build_app(
 
 
 def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
-    if host not in ("127.0.0.1", "::1", "localhost") and not is_dev_insecure():
+    # The bind guard used to be inverted. It refused any non-loopback bind
+    # unless MCP_DEV_INSECURE=1 -- and MCP_DEV_INSECURE is precisely what turns
+    # auth OFF. The only way to serve a network interface was therefore to serve
+    # it with no authentication at all, which made the entire OAuth, keystore,
+    # RBAC and confirm stack unreachable in the deployment it exists for, and
+    # pushed operators toward the one configuration that is actually dangerous.
+    #
+    # Inverted back to what it should always have been: a public bind is allowed
+    # when auth is configured, and refused when it is not.
+    public_bind = host not in ("127.0.0.1", "::1", "localhost")
+    if public_bind and is_dev_insecure():
         raise SystemExit(
-            f"Refusing to bind {host!r} without MCP_DEV_INSECURE=1. "
-            "Public bind requires Phase 3 auth + an explicit dev opt-in."
+            f"Refusing to bind {host!r} with MCP_DEV_INSECURE=1: that combination "
+            "serves an unauthenticated MCP server -- with PCE access -- to the "
+            "network. Either bind 127.0.0.1 for local development, or configure "
+            "auth (MCP_OAUTH_ISSUER etc.) and drop MCP_DEV_INSECURE."
         )
 
     if is_dev_insecure():

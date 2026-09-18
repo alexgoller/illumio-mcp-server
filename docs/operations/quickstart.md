@@ -72,7 +72,7 @@ curl http://127.0.0.1:8080/healthz
 # {"status":"ok"}
 ```
 
-Point MCP Inspector at `http://127.0.0.1:8080/mcp` (transport: Streamable HTTP). All 46 tools are available with no auth check.
+Point MCP Inspector at `http://127.0.0.1:8080/mcp` (transport: Streamable HTTP). All 50 tools are available with no auth check.
 
 The server logs a prominent warning:
 

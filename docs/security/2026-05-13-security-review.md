@@ -32,9 +32,11 @@ parent: Security
 > | Medium — no body-size limits | **Fixed** by the `mcp` 1.29.1 upgrade in `24660e3`; `RequestBodyLimitMiddleware` caps bodies at 4 MiB. |
 > | Low — broken `auth_time`/fresh-auth feature | **Fixed** in `22f3a41`; `AuthenticatedUser.auth_time` is now populated from the OIDC claim. |
 >
-> Not yet addressed: request-rate limits, `Cache-Control: no-store` on
-> `/setup`/`/confirm`, `X-Request-Id` sanitization, `used_jti` growth
-> (`purge_expired` still uncalled), and the remaining Low/Informational items.
+> All of the above are now addressed. Rate limits, `Cache-Control: no-store`,
+> `X-Request-Id` sanitization, HTTP security headers and the `pce_host` SSRF
+> guard shipped in 0.6.0; `used_jti` growth (`purge_expired` really was never
+> called) and the inverted public-bind guard shipped in 0.7.0. Residuals are
+> listed in the [security model](../security-model#known-gaps).
 
 ---
 
