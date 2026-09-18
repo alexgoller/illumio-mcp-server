@@ -41,6 +41,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `identity_labels` on `get-traffic-flows-summary`: the label dimensions that
+  define an endpoint in `app_to_app`. Defaults to `["app","env"]`, but any
+  dimension the PCE defines works — `["bu"]`, `["compliance","env"]`,
+  `["role","loc"]`. demo100 alone has 15 dimensions in use.
+- `group_by` reaches every label dimension as `source_<label>` /
+  `destination_<label>`, case-insensitively. Eight dimensions present in the
+  flow data were previously unreachable by name.
+- `available_dimensions` in the summary response lists what this PCE actually
+  has, so callers need not guess.
 - `detail_level` on `get-traffic-flows-summary`: `"standard"` (default, top 100
   per section) or `"full"`. Fitting inside the response limit is not the same as
   being worth sending, so the default trims the display, never the arithmetic.

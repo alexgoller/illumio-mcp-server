@@ -262,3 +262,118 @@ def test_detail_level_is_advertised_with_both_options():
     prop = tools["get-traffic-flows-summary"].inputSchema["properties"]["detail_level"]
     assert set(prop["enum"]) == {"standard", "full"}
     assert "whole window" in prop["description"].lower()
+
+
+# ----- label dimensions are per-PCE, not a fixed app/env assumption -----
+
+def _labelled_frame():
+    """A frame carrying label keys beyond app/env, as a real PCE does.
+    demo100 defines 15 dimensions: bu, compliance, risk, os, type and more."""
+    rows = []
+    for i in range(60):
+        rows.append({
+            'src_app': f"app{i % 6}", 'src_env': "Production",
+            'src_bu': f"bu{i % 3}", 'src_compliance': "PCI-DSS" if i % 2 else NA,
+            'src_DFIRBubble': f"z{i % 2}",
+            'dst_app': f"app{(i + 2) % 6}", 'dst_env': "Production",
+            'dst_bu': f"bu{(i + 1) % 3}", 'dst_compliance': NA,
+            'dst_DFIRBubble': f"z{(i + 1) % 2}",
+            'src_hostname': f"h{i}", 'dst_hostname': f"d{i}",
+            'src_fqdn': NA, 'dst_fqdn': NA, 'src_ip_lists': NA, 'dst_ip_lists': NA,
+            'src_ip': f"10.0.0.{i}", 'dst_ip': f"10.1.0.{i}",
+            'port': 443, 'proto': 6, 'policy_decision': "allowed",
+            'num_connections': 100 - i, 'process_name': "p.exe",
+            'flow_direction': "outbound", 'user_name': NA,
+            'matched_rules': NA, 'windows_service_name': NA,
+        })
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize("labels,expected_top", [
+    (("app", "env"), "app0 (Production)"),
+    (("bu",), "bu0"),
+    (("compliance", "env"), "PCI-DSS (Production)"),
+])
+def test_identity_labels_change_the_axis_not_the_machinery(labels, expected_top):
+    summary = summarize_traffic_structured(
+        _labelled_frame(), limit=100, identity_labels=labels)
+    froms = {row["from"] for row in summary["app_to_app"]}
+    assert expected_top in froms, f"{labels} produced {sorted(froms)[:4]}"
+
+
+def test_default_identity_is_still_app_env():
+    from illumio_mcp.tools.traffic import DEFAULT_IDENTITY_LABELS
+    assert DEFAULT_IDENTITY_LABELS == ("app", "env")
+
+
+def test_endpoints_without_the_chosen_label_do_not_vanish():
+    """Grouping by a SPARSE label -- compliance, which only some workloads carry
+    -- must not silently drop the rest. They appear as `unlabelled` on whichever
+    side lacks the label, rather than being dropped from the estate."""
+    summary = summarize_traffic_structured(
+        _labelled_frame(), limit=100, identity_labels=("compliance",))
+    endpoints = {row["from"] for row in summary["app_to_app"]}
+    endpoints |= {row["to"] for row in summary["app_to_app"]}
+    assert "unlabelled" in endpoints, (
+        f"endpoints lacking the label disappeared: {sorted(endpoints)}"
+    )
+    assert "PCI-DSS" in endpoints, "labelled endpoints missing"
+
+
+def test_self_pairs_are_excluded_on_any_axis():
+    """app_to_app is between-identity traffic, so X -> X is filtered. On a
+    sparse label that means unlabelled -> unlabelled traffic is not shown here;
+    it is still counted in `totals`."""
+    summary = summarize_traffic_structured(
+        _labelled_frame(), limit=100, identity_labels=("compliance",))
+    assert all(row["from"] != row["to"] for row in summary["app_to_app"])
+
+
+# ----- group_by reaches every label dimension -----
+
+@pytest.mark.parametrize("name,expected", [
+    ("source_bu", "src_bu"),
+    ("destination_bu", "dst_bu"),
+    ("dest_compliance", "dst_compliance"),
+    ("src_bu", "src_bu"),
+    ("source_app", "src_app"),
+])
+def test_group_by_resolves_any_label_dimension(name, expected):
+    from illumio_mcp.tools.traffic import resolve_group_by
+    cols, unknown = resolve_group_by(_labelled_frame(), [name])
+    assert not unknown, f"{name} was rejected"
+    assert expected in cols
+
+
+def test_group_by_is_case_insensitive_for_label_keys():
+    """Label keys preserve case (DFIRBubble) but nobody types them that way.
+    Lowercasing the lookup used to make the column unreachable."""
+    from illumio_mcp.tools.traffic import resolve_group_by
+    cols, unknown = resolve_group_by(_labelled_frame(), ["source_dfirbubble"])
+    assert not unknown
+    assert "src_DFIRBubble" in cols
+
+
+def test_unknown_dimension_is_still_reported():
+    from illumio_mcp.tools.traffic import resolve_group_by
+    _, unknown = resolve_group_by(_labelled_frame(), ["source_nonexistent"])
+    assert unknown == ["source_nonexistent"]
+
+
+def test_available_dimensions_lists_the_labels_this_pce_has():
+    from illumio_mcp.tools.traffic import available_dimensions
+    dims = available_dimensions(_labelled_frame())
+    assert "bu" in dims["labels"] and "compliance" in dims["labels"]
+    assert "ip" not in dims["labels"], "fixed endpoint columns are not labels"
+    assert "source_<label>" in dims["usage"]
+
+
+def test_identity_labels_survive_the_budget_fitter():
+    """It is a list, and an earlier fitter treated every list as a display
+    section -- which dropped it from the response entirely."""
+    df = _labelled_frame()
+    base = summarize_traffic_structured(df, limit=2000, identity_labels=("bu",))
+    base["identity_labels"] = ["bu"]
+    fitted, _ = _fit_summary_to_budget(df, base, MCP_MAX_RESPONSE_BYTES,
+                                       identity_labels=("bu",))
+    assert fitted["identity_labels"] == ["bu"]

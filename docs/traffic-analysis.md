@@ -86,6 +86,67 @@ default trims the display; it does not trim the arithmetic.
 
 ---
 
+## Label dimensions are not fixed to app/env
+
+`app + env` is the Illumio convention for application identity, so it is the
+default — but a PCE can define any dimensions it likes, and most real ones do.
+demo100 defines **15**: `role, app, env, loc, servicecategory, servicerole,
+quarantine.illumio.com, bu, type, os, risk, compliance, WZ, kc, DFIRBubble`.
+
+### Aggregate on a different axis
+
+`identity_labels` changes what `app_to_app` treats as an endpoint's identity:
+
+| `identity_labels` | Pairs | Top row |
+|---|---|---|
+| `["app","env"]` *(default)* | 351 | `laptop (Users) → jump-infra (Production)` |
+| `["bu"]` | 63 | `commerce → it` |
+| `["compliance","env"]` | 79 | `PCI-DSS (PCI) → Production` |
+| `["role","loc"]` | 497 | `processing (ca) → db (ca)` |
+
+The first label is the subject, any others qualify it: `["app","env"]` renders
+`ordering (Production)`, `["role","loc"]` renders `processing (ca)`.
+
+Same machinery, different axis — the aggregation, budget and completeness
+reporting are unchanged.
+
+### `group_by` reaches every label too
+
+Any label works as `source_<label>` or `destination_<label>`:
+
+```json
+{ "group_by": ["source_bu", "destination_bu", "port", "policy"] }
+```
+
+Matching is case-insensitive, so `source_dfirbubble` finds the `DFIRBubble`
+label. Unknown dimensions are **reported, not ignored** — silently grouping by
+something else answers a different question.
+
+### Discovering what a PCE has
+
+Every summary response carries `available_dimensions`:
+
+```json
+"available_dimensions": {
+  "named":  ["source_app", "dest_app", "port", "proto", "policy", ...],
+  "labels": ["DFIRBubble", "app", "bu", "compliance", "env", "loc",
+             "os", "risk", "role", "type"],
+  "usage":  "Any label works as source_<label> or destination_<label>, ..."
+}
+```
+
+`labels` is what this PCE actually uses, not what it has defined — so it reflects
+the estate in front of you.
+
+### Sparse labels
+
+Grouping on a label only some workloads carry is fine: endpoints lacking it show
+as `unlabelled` rather than being dropped. Note that `app_to_app` excludes
+self-pairs on whichever axis you choose, so `unlabelled → unlabelled` traffic is
+not listed there — it is still counted in `totals`.
+
+---
+
 ## "I just want the flows"
 
 Use **`get-traffic-flows`**. It is unchanged: raw flow rows, capped at 500,

@@ -586,19 +586,65 @@ def resolve_group_by(df, group_by=None):
     names = group_by or DEFAULT_GROUP_BY
     if isinstance(names, str):
         names = [names]
+
+    # Label keys are per-PCE, not a fixed set. demo100 alone defines 15
+    # dimensions -- bu, compliance, risk, os, type and more alongside the
+    # familiar app/env/loc/role -- and the flow parser already emits a column
+    # per key, so the data was always there. Only the NAMES were hardcoded.
+    # Resolve case-insensitively because label keys preserve case (DFIRBubble)
+    # while dimension names are written however the caller feels.
+    by_lower = {c.lower(): c for c in df.columns}
+
     columns, unknown = [], []
     for name in names:
-        key = str(name).strip().lower()
+        raw = str(name).strip()
+        key = raw.lower()
+
         if key in GROUP_DIMENSIONS:
             for col in GROUP_DIMENSIONS[key]:
                 if col in df.columns and col not in columns:
                     columns.append(col)
-        elif key in df.columns:       # allow a raw column name as an escape hatch
-            if key not in columns:
-                columns.append(key)
+            continue
+
+        # source_<label> / destination_<label> for any label this PCE defines.
+        matched = None
+        for prefix, side in (("source_", "src"), ("src_", "src"),
+                             ("destination_", "dst"), ("dest_", "dst"),
+                             ("dst_", "dst")):
+            if key.startswith(prefix):
+                matched = by_lower.get(f"{side}_{key[len(prefix):]}")
+                if matched:
+                    break
+        if matched is None:
+            matched = by_lower.get(key)   # raw column name escape hatch
+
+        if matched:
+            if matched not in columns:
+                columns.append(matched)
         else:
             unknown.append(name)
     return columns, unknown
+
+
+def available_dimensions(df) -> dict:
+    """Dimension names this frame supports, so callers need not guess.
+
+    Reported alongside an unknown-dimension error: a caller asking for `bu` on a
+    PCE that has no such label should be told what it does have, not handed an
+    empty result.
+    """
+    static = sorted(k for k in GROUP_DIMENSIONS
+                    if any(c in df.columns for c in GROUP_DIMENSIONS[k]))
+    fixed = {"ip", "hostname", "fqdn", "ip_lists"}
+    labels = sorted({c.split("_", 1)[1] for c in df.columns
+                     if c.startswith(("src_", "dst_"))
+                     and c.split("_", 1)[1] not in fixed})
+    return {
+        "named": static,
+        "labels": labels,
+        "usage": ("Any label works as source_<label> or destination_<label>, "
+                  "e.g. source_bu, destination_compliance."),
+    }
 
 
 def group_flows(df, group_by=None):
@@ -640,7 +686,10 @@ def _endpoint_label(row, prefix: str) -> str:
     return "unknown"
 
 
-def _app_identity(row, prefix: str) -> str:
+DEFAULT_IDENTITY_LABELS = ("app", "env")
+
+
+def _app_identity(row, prefix: str, identity_labels=DEFAULT_IDENTITY_LABELS) -> str:
     """App-level identity for one side of a flow, for the app_to_app view.
 
     Deliberately NOT _endpoint_label, which prefers hostname/FQDN because it is
@@ -649,14 +698,23 @@ def _app_identity(row, prefix: str) -> str:
     30-day window gave 1,394 host pairs where the app+env view is 351. The noise
     was invisible while the summary only ever saw 500 rows.
 
-    Unmanaged and external endpoints have no app label, so they fall back to
+    `identity_labels` defaults to app+env because that is how Illumio defines an
+    application, but it is NOT fixed: a PCE can define any label dimensions, and
+    demo100 alone has 15. Grouping by ("bu",) or ("compliance", "env") is the
+    same operation on a different axis.
+
+    Unmanaged and external endpoints have no such label, so they fall back to
     something still meaningful -- an FQDN or IP list name -- rather than
     collapsing into one "unknown" bucket that hides where traffic really went.
     """
-    app = row.get(f'{prefix}_app')
-    if app and app != NA:
-        env = row.get(f'{prefix}_env')
-        return f"{app} ({env})" if env and env != NA else str(app)
+    parts = []
+    for key in identity_labels:
+        value = row.get(f'{prefix}_{key}')
+        if value and value != NA:
+            parts.append(str(value))
+    if parts:
+        # First label is the subject, the rest qualify it: "ordering (Production)".
+        return f"{parts[0]} ({', '.join(parts[1:])})" if len(parts) > 1 else parts[0]
     for col in (f'{prefix}_fqdn', f'{prefix}_ip_lists'):
         value = row.get(col)
         if value and value != NA:
@@ -668,7 +726,8 @@ def _top(frame, by="num_connections", limit=25):
     return frame.sort_values(by, ascending=False).head(limit)
 
 
-def summarize_traffic_structured(df: pd.DataFrame, *, limit: int = 25) -> dict:
+def summarize_traffic_structured(df: pd.DataFrame, *, limit: int = 25,
+                                 identity_labels=DEFAULT_IDENTITY_LABELS) -> dict:
     """Process-aware structured summary of a traffic DataFrame.
 
     Answers the questions people actually ask of Explorer data, in priority
@@ -706,8 +765,10 @@ def summarize_traffic_structured(df: pd.DataFrame, *, limit: int = 25) -> dict:
     # exposes as the `source_app`/`destination_app` group_by keys -- overwriting
     # those with a formatted "app (env)" string would silently change what
     # group_by returns.
-    df['src_app_identity'] = df.apply(lambda r: _app_identity(r, 'src'), axis=1)
-    df['dst_app_identity'] = df.apply(lambda r: _app_identity(r, 'dst'), axis=1)
+    df['src_app_identity'] = df.apply(
+        lambda r: _app_identity(r, 'src', identity_labels), axis=1)
+    df['dst_app_identity'] = df.apply(
+        lambda r: _app_identity(r, 'dst', identity_labels), axis=1)
 
     out: dict = {
         "totals": {
@@ -1022,6 +1083,11 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
 # Display limits tried in order, widest first. The summary is rebuilt at each
 # until it fits, so a small estate gets everything and a large one degrades by
 # dropping the long tail rather than by silently shrinking every section to 5.
+# The display sections summarize_traffic_structured produces. Named explicitly
+# rather than detected by type: `identity_labels` is also a list but is caller
+# state, and inferring "section" from "is a list" dropped it from the response.
+SUMMARY_SECTIONS = ('by_process', 'external_destinations', 'blocked', 'app_to_app')
+
 _SUMMARY_LIMIT_LADDER = (2000, 1000, 500, 250, 100, 50, 25, 10, 5)
 
 # Fitting inside MCP_MAX_RESPONSE_BYTES is not the same as being worth sending.
@@ -1036,7 +1102,8 @@ _DETAIL_LEVELS = {
 }
 
 
-def _fit_summary_to_budget(df, summary: dict, budget: int, detail_level: str = "standard"):
+def _fit_summary_to_budget(df, summary: dict, budget: int, detail_level: str = "standard",
+                           identity_labels=DEFAULT_IDENTITY_LABELS):
     """Return (summary, payload) for the widest display limit that fits.
 
     `section_totals` is preserved regardless, so the caller can always see how
@@ -1044,9 +1111,14 @@ def _fit_summary_to_budget(df, summary: dict, budget: int, detail_level: str = "
     the point: a trimmed section that looks complete is worse than a smaller one
     that says so.
     """
-    window = summary.get('window')
-    extras = {k: summary[k] for k in
-              ('unresolved_filters', 'unresolved_hint', 'totals') if k in summary}
+    # Carry over everything the caller attached that is not a display section.
+    # This was an allowlist of three known keys, which silently dropped every
+    # field added afterwards -- identity_labels and available_dimensions both
+    # vanished from the response the day they were introduced. A denylist of
+    # "things the rebuild regenerates" cannot rot the same way.
+    regenerated = set(SUMMARY_SECTIONS) | {
+        'section_totals', 'truncated_sections', 'truncation_note', 'note'}
+    extras = {k: v for k, v in summary.items() if k not in regenerated}
 
     ceiling = _DETAIL_LEVELS.get(detail_level, _DETAIL_LEVELS["standard"])
     ladder = (_SUMMARY_LIMIT_LADDER if ceiling is None
@@ -1054,19 +1126,17 @@ def _fit_summary_to_budget(df, summary: dict, budget: int, detail_level: str = "
 
     best, payload = summary, json.dumps(summary, default=str)
     for limit in ladder:
-        candidate = summarize_traffic_structured(df, limit=limit)
+        candidate = summarize_traffic_structured(
+            df, limit=limit, identity_labels=identity_labels)
         candidate.update(extras)
-        if window is not None:
-            candidate['window'] = window
         candidate_payload = json.dumps(candidate, default=str)
         if len(candidate_payload) <= budget:
             best, payload = candidate, candidate_payload
             break
     else:
-        best = summarize_traffic_structured(df, limit=5)
+        best = summarize_traffic_structured(
+            df, limit=5, identity_labels=identity_labels)
         best.update(extras)
-        if window is not None:
-            best['window'] = window
         payload = json.dumps(best, default=str)
         logger.warning("Summary still %d bytes at the narrowest limit", len(payload))
 
@@ -1144,7 +1214,11 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
             meta=fetch_meta)
 
         df = raw_flows_to_dataframe(pce, all_traffic)
-        summary = summarize_traffic_structured(df)
+        identity_labels = tuple(arguments.get('identity_labels')
+                                or DEFAULT_IDENTITY_LABELS)
+        summary = summarize_traffic_structured(df, identity_labels=identity_labels)
+        summary['identity_labels'] = list(identity_labels)
+        summary['available_dimensions'] = available_dimensions(df)
         summary['window'] = {'start': arguments['start_date'], 'end': arguments['end_date']}
         summary['totals']['pce_flows'] = len(all_traffic)
         summary['totals']['truncated_at'] = max_results
@@ -1174,7 +1248,8 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
         # demo100 the whole 30-day estate fits at ~340 KB.
         summary, payload = _fit_summary_to_budget(
             df, summary, MCP_MAX_RESPONSE_BYTES,
-            detail_level=arguments.get('detail_level', 'standard'))
+            detail_level=arguments.get('detail_level', 'standard'),
+            identity_labels=identity_labels)
 
         return [types.TextContent(type="text", text=payload)]
     except Exception as e:
