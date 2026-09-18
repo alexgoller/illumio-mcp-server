@@ -49,30 +49,44 @@ def test_flows_analysed_is_reported():
     assert "flows_analysed" in inspect.getsource(ringfence.handle_create_ringfence)
 
 
-# ----- deny_service resolution must not break the non-selective path -----
+# ----- All Services resolution: needed by EVERY ringfence -----
 
-def test_deny_service_is_only_resolved_for_selective_ringfences():
-    """Only selective mode writes a deny rule.
+def test_all_services_is_resolved_for_every_ringfence_not_just_selective():
+    """The intra-scope and extra-scope ALLOW rules are built from All Services
+    too, so gating its lookup on `selective` left all_services_href None on a
+    standard ringfence. It fell through to the port -1 fallback and the PCE
+    answered `Invalid value -1 - must be integer between 0 and 65535`.
 
-    Resolving the deny service unconditionally made every ringfence -- plain,
-    dry-run, non-selective -- depend on a service lookup it never uses, so a
-    transient failure there broke runs that have no deny rule at all.
+    An earlier version of this test asserted the opposite -- that the lookup
+    belonged inside `if selective:` -- and so locked the regression in.
     """
     src = inspect.getsource(ringfence.handle_create_ringfence)
-    resolve_at = src.index("resolve_ingress_services(")
-    guard_at = src.index("if selective:")
-    assert guard_at < resolve_at, (
-        "the deny-service lookup is not inside the `if selective:` branch"
+    resolve_at = src.index("resolve_ingress_services(pce, ALL_SERVICES)")
+    selective_at = src.index("if selective and explicit_deny_service:")
+    assert resolve_at < selective_at, (
+        "All Services must be resolved before, and independently of, any "
+        "selective-only branch"
     )
 
 
-def test_default_deny_service_failure_falls_back_rather_than_erroring():
-    """The All Services default is recoverable -- the port -1 fallback predates
-    this feature. Only a deny service the caller NAMED is fatal, because
-    substituting something broader would silently write different policy."""
+def test_all_services_href_comes_from_the_unconditional_lookup():
+    """Not from the deny-service result, which a caller can override -- a
+    narrowed deny_service must not change what the ALLOW rules cover."""
     src = inspect.getsource(ringfence.handle_create_ringfence)
-    assert "if explicit_deny_service:" in src
+    assert "for item in default_services if item.get(\"href\")" in src
+
+
+def test_explicit_deny_service_is_fatal_but_the_default_is_recoverable():
+    """Substituting something broader for a deny the caller named would write
+    different policy than asked for. The default has a documented fallback."""
+    src = inspect.getsource(ringfence.handle_create_ringfence)
+    assert '"error": "invalid_deny_service"' in src
     assert "port -1 fallback" in src
+
+
+def test_deny_service_override_only_applies_to_selective():
+    src = inspect.getsource(ringfence.handle_create_ringfence)
+    assert "if selective and explicit_deny_service:" in src
 
 
 def test_ignored_deny_service_is_reported_not_swallowed():

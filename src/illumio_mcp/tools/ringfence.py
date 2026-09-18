@@ -95,26 +95,34 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         # Resolving it unconditionally made a transient lookup failure break
         # plain and dry-run ringfences that never touch a deny service.
         explicit_deny_service = arguments.get("deny_service")
-        deny_service_ref = explicit_deny_service or ALL_SERVICES
-        resolved_deny_services, deny_services_display = [], []
 
-        if selective:
+        # All Services is needed by EVERY ringfence, not just selective ones:
+        # the intra-scope and extra-scope ALLOW rules are built from it too.
+        # Resolving it only for selective runs left all_services_href None on a
+        # standard ringfence, which fell through to the port -1 fallback and the
+        # PCE answered "Invalid value -1 - must be integer between 0 and 65535".
+        # Recoverable on failure, as it was before: warn and use the fallback.
+        default_services, default_display = [], []
+        try:
+            default_services, default_display = resolve_ingress_services(pce, ALL_SERVICES)
+        except ServiceRefError as e:
+            logger.warning("could not resolve %r (%s); using the port -1 fallback",
+                           ALL_SERVICES, e)
+
+        # A deny service the caller NAMED is their intent, and only selective
+        # mode writes a deny rule. Substituting something broader would silently
+        # write different policy, so an unresolvable explicit value is fatal.
+        resolved_deny_services, deny_services_display = default_services, default_display
+        if selective and explicit_deny_service:
             try:
                 resolved_deny_services, deny_services_display = resolve_ingress_services(
-                    pce, deny_service_ref)
+                    pce, explicit_deny_service)
             except ServiceRefError as e:
-                # A deny service the caller NAMED is their intent: substituting
-                # something broader would silently write different policy, so
-                # that is fatal. The All Services default is recoverable -- the
-                # port -1 fallback below is what this tool did before.
-                if explicit_deny_service:
-                    return [types.TextContent(type="text", text=json.dumps({
-                        "error": "invalid_deny_service", "message": str(e)}, indent=2))]
-                logger.warning("could not resolve %r (%s); using the port -1 fallback",
-                               ALL_SERVICES, e)
+                return [types.TextContent(type="text", text=json.dumps({
+                    "error": "invalid_deny_service", "message": str(e)}, indent=2))]
 
         all_services_href = next(
-            (item.get("href") for item in resolved_deny_services if item.get("href")), None)
+            (item.get("href") for item in default_services if item.get("href")), None)
 
         # Only selective mode writes a deny rule. Saying so beats ignoring a
         # parameter the caller deliberately set.

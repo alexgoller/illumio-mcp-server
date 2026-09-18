@@ -2498,6 +2498,16 @@ async def handle_list_tools() -> list[types.Tool]:
                         }
                     },
                     "exclude_workloads_from_ip_list_query": {"type": "boolean"},
+                    "identity_labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Label dimensions that define an endpoint's identity in app_to_app. Defaults to ['app','env'] because that is how Illumio defines an application, but ANY label this PCE defines works: ['bu'] for a business-unit view, ['compliance','env'] for a compliance view, ['role','loc'] for a tiered one. The response's available_dimensions lists what this PCE actually has."
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "enum": ["standard", "full"],
+                        "description": "How much of each section to show. 'standard' (default) shows the top 100 per section; 'full' shows everything that fits the response limit, which can be ~10x the tokens. Analysis always covers the WHOLE window either way -- totals and section_totals are computed over every row, so the numbers are identical; only the displayed rows differ."
+                    },
                     "max_results": {"type": "integer"},
                     "query_name": {"type": "string"}
                 },

@@ -22,6 +22,72 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.0] — 2026-09-17
+
+### Changed
+
+- **Traffic tools that aggregate now query the PCE wide.** `MCP_QUERY_MAX_RESULTS`
+  (200,000) is separate from `MCP_BUG_MAX_RESULTS` (500). The 500 was always a
+  *response*-size limit; using it as a *query* limit meant every summary was
+  computed from the first 500 rows the PCE returned. Measured on demo100: a
+  30-day whole-estate window is ~8,000 Explorer rows, so summaries described 6%
+  of the window — and not a representative 6%.
+- The summary now spends its response budget on aggregated tuples, widest first,
+  instead of cutting every section to 5. The same 30-day estate returns complete
+  at ~340 KB of the 800 KB budget.
+- `app_to_app` groups on **app+env identity**, not workload hostname. It was
+  documented as "the coarse app-to-app view" but grouped on a label that prefers
+  hostname, so it returned 1,394 host pairs where the app view is 351.
+
+### Added
+
+- `identity_labels` on `get-traffic-flows-summary`: the label dimensions that
+  define an endpoint in `app_to_app`. Defaults to `["app","env"]`, but any
+  dimension the PCE defines works — `["bu"]`, `["compliance","env"]`,
+  `["role","loc"]`. demo100 alone has 15 dimensions in use.
+- `group_by` reaches every label dimension as `source_<label>` /
+  `destination_<label>`, case-insensitively. Eight dimensions present in the
+  flow data were previously unreachable by name.
+- `available_dimensions` in the summary response lists what this PCE actually
+  has, so callers need not guess.
+- `detail_level` on `get-traffic-flows-summary`: `"standard"` (default, top 100
+  per section) or `"full"`. Fitting inside the response limit is not the same as
+  being worth sending, so the default trims the display, never the arithmetic.
+- `section_totals` on the summary: the full count of every section, regardless of
+  how many are shown.
+- `truncated_sections` + `truncation_note` naming exactly what was trimmed.
+
+### Unlearn
+
+- **`truncated: true` on a summary no longer means "we only looked at 500 rows".**
+  It now means the whole window was analysed and the *display* was trimmed.
+  Counts from earlier sessions are not comparable — they were computed from a
+  fraction of the window.
+- **`app_to_app` entries are apps, not hosts.** `{"from": "laptop (Users)"}`, not
+  `{"from": "pay-web01-prd"}`. Anything matching hostnames there will stop.
+  External endpoints appear as `external:<fqdn>`.
+- **Read `section_totals`, not the array length**, to know how much exists. A
+  section array is a display slice; its length never meant "this is all there is".
+- Summaries take longer now (~10s for 30 days on a mid-size estate) because they
+  read the whole window. That is the query doing its job, not a hang.
+- **Responses are larger**: ~28k tokens at the default `detail_level="standard"`,
+  up from ~8k. `detail_level="full"` is ~87k. Both analyse the whole window --
+  only the displayed rows differ, and `totals`/`section_totals` are identical
+  between them.
+- **`get-traffic-flows` is unchanged.** If you want raw flow rows it is still the
+  tool, still capped at 500. Narrow the query rather than asking for more rows.
+
+### Fixed
+
+- **Standard (non-selective) ringfences were broken on main.** 0.4.0 scoped the
+  All Services lookup to selective runs, but the intra-scope and extra-scope
+  ALLOW rules are built from it too, so a standard ringfence fell through to the
+  port -1 fallback and the PCE answered `Invalid value -1 - must be integer
+  between 0 and 65535`. The lookup now happens for every ringfence; only the
+  `deny_service` override remains selective-only.
+
+---
+
 ## [0.4.0] — 2026-09-16
 
 ### Added
