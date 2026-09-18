@@ -41,6 +41,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `detail_level` on `get-traffic-flows-summary`: `"standard"` (default, top 100
+  per section) or `"full"`. Fitting inside the response limit is not the same as
+  being worth sending, so the default trims the display, never the arithmetic.
 - `section_totals` on the summary: the full count of every section, regardless of
   how many are shown.
 - `truncated_sections` + `truncation_note` naming exactly what was trimmed.
@@ -56,8 +59,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   External endpoints appear as `external:<fqdn>`.
 - **Read `section_totals`, not the array length**, to know how much exists. A
   section array is a display slice; its length never meant "this is all there is".
-- Summaries take longer now (~8s for 30 days on a mid-size estate) because they
+- Summaries take longer now (~10s for 30 days on a mid-size estate) because they
   read the whole window. That is the query doing its job, not a hang.
+- **Responses are larger**: ~28k tokens at the default `detail_level="standard"`,
+  up from ~8k. `detail_level="full"` is ~87k. Both analyse the whole window --
+  only the displayed rows differ, and `totals`/`section_totals` are identical
+  between them.
+- **`get-traffic-flows` is unchanged.** If you want raw flow rows it is still the
+  tool, still capped at 500. Narrow the query rather than asking for more rows.
 
 ### Fixed
 

@@ -2498,6 +2498,11 @@ async def handle_list_tools() -> list[types.Tool]:
                         }
                     },
                     "exclude_workloads_from_ip_list_query": {"type": "boolean"},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": ["standard", "full"],
+                        "description": "How much of each section to show. 'standard' (default) shows the top 100 per section; 'full' shows everything that fits the response limit, which can be ~10x the tokens. Analysis always covers the WHOLE window either way -- totals and section_totals are computed over every row, so the numbers are identical; only the displayed rows differ."
+                    },
                     "max_results": {"type": "integer"},
                     "query_name": {"type": "string"}
                 },

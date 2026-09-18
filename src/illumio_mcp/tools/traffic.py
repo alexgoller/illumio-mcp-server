@@ -1024,8 +1024,19 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
 # dropping the long tail rather than by silently shrinking every section to 5.
 _SUMMARY_LIMIT_LADDER = (2000, 1000, 500, 250, 100, 50, 25, 10, 5)
 
+# Fitting inside MCP_MAX_RESPONSE_BYTES is not the same as being worth sending.
+# Measured on demo100: showing every row of a complete 30-day estate summary is
+# ~348 KB, roughly 87k tokens of context for one call, where the first hundred
+# rows of each section answer the question at ~28k. Analysis still covers 100%
+# of the window either way -- `totals` and `section_totals` are computed over
+# every row -- so the default trims the DISPLAY, not the arithmetic.
+_DETAIL_LEVELS = {
+    "standard": 100,   # default
+    "full": None,      # widest that fits the byte budget
+}
 
-def _fit_summary_to_budget(df, summary: dict, budget: int):
+
+def _fit_summary_to_budget(df, summary: dict, budget: int, detail_level: str = "standard"):
     """Return (summary, payload) for the widest display limit that fits.
 
     `section_totals` is preserved regardless, so the caller can always see how
@@ -1037,8 +1048,12 @@ def _fit_summary_to_budget(df, summary: dict, budget: int):
     extras = {k: summary[k] for k in
               ('unresolved_filters', 'unresolved_hint', 'totals') if k in summary}
 
+    ceiling = _DETAIL_LEVELS.get(detail_level, _DETAIL_LEVELS["standard"])
+    ladder = (_SUMMARY_LIMIT_LADDER if ceiling is None
+              else tuple(x for x in _SUMMARY_LIMIT_LADDER if x <= ceiling) or (5,))
+
     best, payload = summary, json.dumps(summary, default=str)
-    for limit in _SUMMARY_LIMIT_LADDER:
+    for limit in ladder:
         candidate = summarize_traffic_structured(df, limit=limit)
         candidate.update(extras)
         if window is not None:
@@ -1060,9 +1075,10 @@ def _fit_summary_to_budget(df, summary: dict, budget: int):
     if trimmed:
         best['truncated_sections'] = trimmed
         best['truncation_note'] = (
-            "Sections were trimmed for response size, ranked by connections. "
-            "`section_totals` gives the full count of each; narrow the window or "
-            "add label filters to see the rest."
+            "Display was trimmed, ranked by connections. The ANALYSIS still "
+            "covers the whole window -- `totals` and `section_totals` are "
+            "computed over every row. Pass detail_level='full' for every row, "
+            "or narrow the window / add label filters."
         )
         payload = json.dumps(best, default=str)
     return best, payload
@@ -1157,7 +1173,8 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
         # budget stretches far further than the old cut-to-5 assumed -- on
         # demo100 the whole 30-day estate fits at ~340 KB.
         summary, payload = _fit_summary_to_budget(
-            df, summary, MCP_MAX_RESPONSE_BYTES)
+            df, summary, MCP_MAX_RESPONSE_BYTES,
+            detail_level=arguments.get('detail_level', 'standard'))
 
         return [types.TextContent(type="text", text=payload)]
     except Exception as e:

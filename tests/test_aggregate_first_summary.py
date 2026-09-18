@@ -200,3 +200,65 @@ def test_app_identity_does_not_clobber_the_group_by_columns():
     assert set(df['src_app']) == {f"app{i}" for i in range(12)}, (
         "raw src_app was overwritten by the display identity"
     )
+
+
+# ----- detail_level: analysis is always complete, display is not -----
+
+def test_standard_shows_less_than_full():
+    df = _frame()
+    base = summarize_traffic_structured(df, limit=2000)
+    std, std_payload = _fit_summary_to_budget(
+        df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="standard")
+    full, full_payload = _fit_summary_to_budget(
+        df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="full")
+    assert len(std_payload) < len(full_payload)
+
+
+def test_both_detail_levels_report_identical_totals():
+    """The whole point: trimming the DISPLAY must not change the arithmetic.
+    A smaller response that also reported smaller numbers would be a lie."""
+    df = _frame()
+    base = summarize_traffic_structured(df, limit=2000)
+    std, _ = _fit_summary_to_budget(df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="standard")
+    full, _ = _fit_summary_to_budget(df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="full")
+    assert std["section_totals"] == full["section_totals"]
+    assert std["totals"] == full["totals"]
+
+
+def test_standard_is_the_default_for_an_unknown_level():
+    df = _frame()
+    base = summarize_traffic_structured(df, limit=2000)
+    default, _ = _fit_summary_to_budget(df, dict(base), MCP_MAX_RESPONSE_BYTES)
+    named, _ = _fit_summary_to_budget(df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="standard")
+    bogus, _ = _fit_summary_to_budget(df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="nonsense")
+    assert len(default["app_to_app"]) == len(named["app_to_app"]) == len(bogus["app_to_app"])
+
+
+def test_standard_caps_sections_at_the_standard_ceiling():
+    df = _frame(1200)
+    base = summarize_traffic_structured(df, limit=2000)
+    std, _ = _fit_summary_to_budget(df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="standard")
+    for key, shown in ((k, len(v)) for k, v in std.items()
+                       if isinstance(v, list) and k != "truncated_sections"):
+        assert shown <= 100, f"{key} showed {shown} rows at detail_level=standard"
+
+
+def test_trimmed_standard_says_the_analysis_was_complete():
+    """Otherwise a trimmed section reads as a truncated query, which is exactly
+    the confusion this whole change set out to remove."""
+    df = _frame(1200)
+    base = summarize_traffic_structured(df, limit=2000)
+    std, _ = _fit_summary_to_budget(df, dict(base), MCP_MAX_RESPONSE_BYTES, detail_level="standard")
+    if std.get("truncated_sections"):
+        note = std["truncation_note"]
+        assert "whole window" in note
+        assert "detail_level='full'" in note
+
+
+def test_detail_level_is_advertised_with_both_options():
+    import asyncio
+    from illumio_mcp.server import handle_list_tools
+    tools = {t.name: t for t in asyncio.run(handle_list_tools())}
+    prop = tools["get-traffic-flows-summary"].inputSchema["properties"]["detail_level"]
+    assert set(prop["enum"]) == {"standard", "full"}
+    assert "whole window" in prop["description"].lower()
