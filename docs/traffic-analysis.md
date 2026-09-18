@@ -31,7 +31,7 @@ A single constant used to answer two unrelated questions — how many rows to
 **ask the PCE for**, and how many to **hand back**. Both were 500, so every
 summary was computed from the first 500 rows the PCE happened to return.
 
-Measured on demo100, a 30-day whole-estate window:
+Measured on a mid-size demo estate, a 30-day whole-estate window:
 
 | | Before | After |
 |---|---|---|
@@ -90,8 +90,8 @@ default trims the display; it does not trim the arithmetic.
 
 `app + env` is the Illumio convention for application identity, so it is the
 default — but a PCE can define any dimensions it likes, and most real ones do.
-demo100 defines **15**: `role, app, env, loc, servicecategory, servicerole,
-quarantine.illumio.com, bu, type, os, risk, compliance, WZ, kc, DFIRBubble`.
+One estate we tested against defines **15**, including `bu`, `type`, `os`,
+`risk` and `compliance` alongside the familiar `role`, `app`, `env` and `loc`.
 
 ### Aggregate on a different axis
 
@@ -99,10 +99,10 @@ quarantine.illumio.com, bu, type, os, risk, compliance, WZ, kc, DFIRBubble`.
 
 | `identity_labels` | Pairs | Top row |
 |---|---|---|
-| `["app","env"]` *(default)* | 351 | `laptop (Users) → jump-infra (Production)` |
-| `["bu"]` | 63 | `commerce → it` |
+| `["app","env"]` *(default)* | 351 | `vdi (Users) → jump-infra (Production)` |
+| `["bu"]` | 63 | `commerce → shared-it` |
 | `["compliance","env"]` | 79 | `PCI-DSS (PCI) → Production` |
-| `["role","loc"]` | 497 | `processing (ca) → db (ca)` |
+| `["role","loc"]` | 497 | `processing (eu) → db (eu)` |
 
 The first label is the subject, any others qualify it: `["app","env"]` renders
 `ordering (Production)`, `["role","loc"]` renders `processing (ca)`.
@@ -118,8 +118,8 @@ Any label works as `source_<label>` or `destination_<label>`:
 { "group_by": ["source_bu", "destination_bu", "port", "policy"] }
 ```
 
-Matching is case-insensitive, so `source_dfirbubble` finds the `DFIRBubble`
-label. Unknown dimensions are **reported, not ignored** — silently grouping by
+Matching is case-insensitive, so `source_businessunit` finds a `BusinessUnit`
+label whatever case it was defined in. Unknown dimensions are **reported, not ignored** — silently grouping by
 something else answers a different question.
 
 ### Discovering what a PCE has
@@ -129,7 +129,7 @@ Every summary response carries `available_dimensions`:
 ```json
 "available_dimensions": {
   "named":  ["source_app", "dest_app", "port", "proto", "policy", ...],
-  "labels": ["DFIRBubble", "app", "bu", "compliance", "env", "loc",
+  "labels": ["app", "bu", "compliance", "env", "loc",
              "os", "risk", "role", "type"],
   "usage":  "Any label works as source_<label> or destination_<label>, ..."
 }
@@ -175,8 +175,8 @@ dump.
 ### 1. `app_to_app` values are apps now, not hostnames
 
 ```diff
-- {"from": "pos-web03-pci",  "to": "pos-proc03-pci",        ...}
-+ {"from": "laptop (Users)", "to": "jump-infra (Production)", ...}
+- {"from": "web03-prod",     "to": "appsrv03-prod",          ...}
++ {"from": "vdi (Users)",    "to": "jump-infra (Production)", ...}
 ```
 
 The section was documented as "the coarse app-to-app view" but grouped on a
