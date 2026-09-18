@@ -123,7 +123,7 @@ which other apps communicate with this... |
 | `delete-pce-credentials` | reader | **write** | Remove the current user's stored PCE credentials. Idempotent — safe to call even if no credentials are stored. |
 | `get-events` | reader | *read* | Get events from the PCE with optional filtering |
 | `get-pairing-profiles` | reader | *read* | Get pairing profiles from the PCE. Pairing profiles define the initial enforcement mode and labels for VENs when they pair with... |
-| `register-pce-credentials` | reader | **write** | Register (or overwrite) PCE credentials for the current authenticated user. After registering, all PCE tools become available i... |
+| `register-pce-credentials` | operator | **write** | Register (or overwrite) PCE credentials for the current authenticated user. After registering, all PCE tools become available i... |
 
 ## Other
 

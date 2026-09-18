@@ -1,79 +1,78 @@
-# Process-based egress services + service references in rules
+# Close the four open security-review findings
 
-Spec: process-qualified services and service-object references, to unblock the
-Shadow AI demo ("browser only into payment").
+Source: docs/security/2026-05-13-security-review.md (v0.2.0 review).
+Verified still open in current code before starting.
 
 ## Plan
 
-- [x] A1. `service_refs.py` — shared resolver (mirrors `label_refs.py`)
-      - ingress_services union: inline {port,proto,to_port} | {href} | {service}
-      - exact-name resolution (PCE ?name= is substring: S-HTTP -> 3 matches)
-      - All Services href cached per org
-      - unknown/mixed keys = hard error, never strip
-      - windows_services / windows_egress_services validation + proto coercion
-- [x] A2. create-service / update-service accept windows_(egress_)services
-      - drop service_ports required; require >=1 of the three
-- [x] A3. get-services returns windows_egress_services + egress_process_name filter
-- [x] B.  ingress_services union in create-deny-rule, update-deny-rule, create-ruleset
-- [x] C.  new update-sec-rule + delete-sec-rule
-- [x] D.  create-ringfence deny_service (default "All Services")
-- [x] E.  output hygiene: echo resolved form with resolved_name; fail before PCE call
-- [x] F.  Windows-VEN warning when egress-process service meets non-Windows consumers
-- [x] G.  schemas in server.py + registry + docs + CHANGELOG entry
-- [x] H.  tests (unit, no PCE) + live verification of all 7 acceptance criteria
+- [x] 1. SecurityHeadersMiddleware — X-Content-Type-Options, X-Frame-Options,
+      CSP, Referrer-Policy on every response.
+- [x] 2. Cache-Control: no-store on /setup and /confirm (same middleware —
+      they are the same concern: what a response is allowed to leak onward).
+- [x] 3. Per-subject rate limiting: /confirm 10/min, /mcp 60/min.
+- [x] 4. SSRF guard on the user-supplied pce_host.
+- [x] 5. (adjacent, 3 lines) Sanitise client-controlled X-Request-Id — the last
+      MEDIUM in the review, in a file item 1 already touches.
+- [x] 6. Tests + full suite + update the review with a status column.
 
-## Verified against live PCE (org 5636114) before coding
+## The one real design trap
 
-- All Services href = /orgs/5636114/sec_policy/draft/services/24206847997119298
-- GET services?name=S-HTTP -> ['S-HTTPS','S-HTTPS-UDP','S-HTTP']  (substring)
-- SDK Service already has windows_egress_services; Rule.build takes dicts,
-  so hrefs can flow through the allow path without bypassing the SDK.
+**Illumio PCEs are frequently on-prem, on RFC1918 addresses.** The review says
+"validate the hostname is not a loopback/link-local/private-range address".
+Blocking private ranges outright would break every legitimate on-prem
+deployment — the majority of real Illumio installs.
+
+So the guard must block what is actually dangerous without breaking the normal
+case:
+
+  BLOCK  loopback, link-local (169.254.0.0/16 — cloud metadata at
+         169.254.169.254 is the real prize here), unspecified, multicast,
+         reserved
+  ALLOW  RFC1918, because that is where a real PCE lives
+  OPT-IN MCP_ALLOWED_PCE_HOSTS as a strict allowlist for operators who want one
+
+That kills cloud-metadata SSRF, which is the finding's substance, while leaving
+on-prem working.
+
+## Rate limiting: no new dependency
+
+The review suggests slowapi. An in-process token bucket keyed by JWT `sub` is
+~40 lines and avoids a dependency in a server people self-deploy. Honest
+caveat to document: per-process, so a multi-worker deployment multiplies the
+effective limit. Stated in the docs rather than hidden.
 
 ## Review
 
-### Three places the spec did not match the PCE
+All five findings closed (the four asked for, plus the adjacent X-Request-Id
+MEDIUM). Suite: 568 passed, 1 skipped, 0 failed.
 
-Found by probing before and during implementation, not by reasoning about it.
-Each would have shipped a broken demo if implemented as written.
+### The design call that mattered
 
-1. `windows_egress_services` does NOT take port/to_port/proto. The PCE answers
-   `input_validation_error ... additional properties ["port","proto"] ... none
-   are allowed`. The spec's worked example carries both and is rejected.
+The review said to reject "loopback/link-local/private-range". Blocking RFC1918
+would break most real Illumio deployments -- an on-prem PCE lives there by
+design -- and a guard that breaks the normal case gets switched off. Blocked
+what is actually dangerous (loopback, link-local/cloud-metadata, unspecified,
+multicast, reserved), allowed RFC1918, and added MCP_ALLOWED_PCE_HOSTS for
+operators who want strictness.
 
-2. The three qualifier lists are MUTUALLY EXCLUSIVE -- a service carries an OS
-   type. Sending service_ports with windows_egress_services returns 201 while
-   silently storing service_ports: null. Editing one into the other answers
-   `cannot change OS type of service`. So "chrome.exe on 443" is not one
-   service object, which the spec assumed it was.
+### A design error I made and corrected
 
-3. A Windows egress service cannot be used in a rule's `ingress_services` at
-   all (`ingress_service_cannot_be_windows_egress_service`). It belongs in
-   `egress_services`, a rule field the Illumio SDK's Rule dataclass does not
-   model -- which is presumably why the spec routed it through
-   ingress_services. Found by diffing raw rule JSON against the SDK fields.
+The first cut treated DNS resolution failure as fatal. That broke per-user
+credential registration entirely -- 7 suite failures -- because test and real
+hosts alike may not resolve from the server. It also bought no security: an
+unresolvable name is not an SSRF target now, and if it resolves dangerously
+later that is rebinding, which this approach never closed. Now: resolve and
+validate what comes back, allow what does not resolve, and say so in the log.
 
-The pattern that actually works, verified end to end:
-    service: windows_egress_services = [{process_name: chrome.exe}]
-    rule:    ingress_services = [{port: 443}]   (provider side)
-             egress_services  = [{service: "S-VDI-chrome-egress"}]  (consumer)
+### Scope that grew for a good reason
 
-### Bug I introduced and caught before shipping
+Expanding the IP attribution sources needed the lookup replaced first.
+Benchmarked before writing anything: the linear scan cost 36ms per 8,000-row
+summary at 30 ranges and projected to ~6 SECONDS at 5,000 -- it would have
+doubled the cost of the aggregate-first work. The prefix matcher does 2,869
+ranges in 22ms.
 
-`deny_service` defaults to the string "All Services", but the resolver only
-accepted lists/dicts -- so every selective ringfence would have failed with
-invalid_deny_service. The resolver now accepts a scalar name. Covered by a
-regression test naming the consequence.
-
-### Acceptance criteria
-
-1. egress-only service + egress_process_name lookup    PASS
-2. deny with {"service": "All Services"} -> All Svcs href  PASS
-3. conflicting port+href rejected, nothing written      PASS (deny count 1 -> 1)
-4. {"service": "S-HTTP"} exact, not S-HTTPS             PASS
-5. update-sec-rule swaps services in place             PASS
-6. full demo sequence with no UI step                  PASS up to provision,
-   which was deliberately NOT run -- provisioning stays the user's click.
-7. inline {port, proto} callers unchanged              PASS (stored 443/6)
-
-All test objects created on demo100 were deleted; draft policy is back to its
-prior state.
+That also turned "no overlapping ranges" from an invariant into a mistake:
+longest-prefix means Microsoft 365's /19 correctly beats Azure's /8. Three
+tests asserting no-overlap were replaced with tests asserting the more specific
+claim wins.

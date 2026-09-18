@@ -68,14 +68,26 @@ def test_provider_ranges_are_compiled_not_strings():
             assert isinstance(net, (ipaddress.IPv4Network, ipaddress.IPv6Network))
 
 
-def test_ranges_do_not_overlap_across_providers():
-    """Overlapping ranges make attribution order-dependent."""
+def test_overlapping_ranges_resolve_to_the_most_specific():
+    """Lookup is longest-prefix, so overlap is expected and correct: Microsoft
+    365's /19 inside the coarse Azure /8 must report Microsoft 365. This
+    replaced a no-overlap rule that was only valid while lookup was a linear
+    scan over a handful of ranges."""
     import ipaddress
-    nets = [(name, n) for name, _conf, ns in AI_PROVIDER_RANGES for n in ns]
-    for i, (n1, a) in enumerate(nets):
-        for n2, b in nets[i + 1:]:
-            if n1 != n2:
-                assert not a.overlaps(b), f"{n1} {a} overlaps {n2} {b}"
+    from illumio_mcp.ip_match import PrefixMatcher
+    m = PrefixMatcher([("20.0.0.0/8", "azure"), ("20.20.32.0/19", "m365")])
+    assert m.lookup("20.20.32.5") == "m365"
+    assert m.lookup("20.99.1.1") == "azure"
+
+
+def test_no_two_providers_claim_the_identical_range():
+    """The one overlap case with no longest-prefix winner."""
+    import ipaddress
+    seen = {}
+    for name, _conf, nets in AI_PROVIDER_RANGES:
+        for net in nets:
+            owner = seen.setdefault(net, name)
+            assert owner == name, f"{net} claimed by both {owner} and {name}"
 
 
 # ----- process basename -----

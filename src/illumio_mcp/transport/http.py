@@ -51,6 +51,8 @@ from ..server import (
     reset_http_context,
 )
 from .request_id import RequestIdMiddleware
+from .security_headers import SecurityHeadersMiddleware
+from .rate_limit_middleware import RateLimitMiddleware
 from .setup_page import build_setup_routes
 from .confirm_endpoint import build_confirm_routes
 
@@ -122,7 +124,10 @@ def _build_app(
         Route("/readyz", readyz, methods=["GET"]),
     ]
 
-    middleware = [Middleware(RequestIdMiddleware)]
+    # Order matters. Starlette applies these outermost-first, so security
+    # headers wrap everything (including error responses and 429s), and the
+    # rate limiter sits inside auth so it can key on the authenticated subject.
+    middleware = [Middleware(SecurityHeadersMiddleware), Middleware(RequestIdMiddleware)]
     if oauth_config is not None:
         async def prm(_: Request) -> Response:
             return JSONResponse(build_prm_document(oauth_config))
@@ -135,6 +140,7 @@ def _build_app(
 
         validator = JWTValidator(oauth_config)
         middleware.append(Middleware(JWTAuthMiddleware, validator=validator, config=oauth_config))
+        middleware.append(Middleware(RateLimitMiddleware))
     else:
         logger.warning("MCP_DEV_INSECURE=1: HTTP server starting WITHOUT auth. Do not use in production.")
 
