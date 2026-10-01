@@ -2,6 +2,7 @@ import json
 import logging
 import mcp.types as types
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 from ..service_refs import (
     resolve_ingress_services, windows_qualified_services, ServiceRefError,
 )
@@ -183,7 +184,7 @@ def handle_create_deny_rule(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-            error_msg = f"Failed to create deny rule: {str(e)}"
+            error_msg = f"Failed to create deny rule: {describe_error(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(
                 type="text",
@@ -273,7 +274,7 @@ def handle_update_deny_rule(ctx, arguments: dict) -> list:
                                 if resolved_display else {})}, indent=2)
         )]
     except Exception as e:
-            error_msg = f"Failed to update deny rule: {str(e)}"
+            error_msg = f"Failed to update deny rule: {describe_error(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -295,7 +296,7 @@ def handle_delete_deny_rule(ctx, arguments: dict) -> list:
             text=json.dumps({"message": f"Successfully deleted deny rule {href}"}, indent=2)
         )]
     except Exception as e:
-            error_msg = f"Failed to delete deny rule: {str(e)}"
+            error_msg = f"Failed to delete deny rule: {describe_error(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 

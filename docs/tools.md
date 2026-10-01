@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 50 tools, grouped by area. Generated from the server's own registry by
+All 51 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -129,6 +129,7 @@ which other apps communicate with this... |
 
 | Tool | Access | Type | Description |
 |---|---|---|---|
+| `build-identity-graph` | reader | *read* | Identity-centric view of traffic: which ACCOUNT the communicating process ran as, which workloads it acted from, what it reached, and over what period. Answers least-privilege questions that workload labels cannot -- what can this account reach, and from how many places. Resolves DOMAIN\user and user@realm to one identity, so a person appearing as both CRYSTAL\jdoe and jdoe is not counted twice. Classifies service accounts (root, SYSTEM, mysql) separately from interactive ones, because wide host spread is normal for a daemon and notable for a person. Findings are ranked by how unexpected they are, and are observations, not verdicts. |
 | `discover-process-egress` | reader | *read* | Find which processes talk to destinations outside this PCE's managed estate - the shadow-IT / unsanctioned-egress question. Returns ranked findings of process -> external destination with port, protocol, the user, current policy decision and volume, preferring an FQDN over a bare IP where the PCE resolved one. Use this instead of get-traffic-flows when the question is 'what is talking out', not 'show me all traffic'. |
 | `get-server-changelog` | reader | *read* | What changed in this MCP server. Call this when tool behaviour does not match what you expect, after the server has been updated mid-session, or before relying on assumptions formed earlier in a long session -- a cached tools/list and remembered response shapes are not refreshed when the server changes. The `unlearn` field lists behaviour changes that make previously correct assumptions wrong. Needs no PCE connection. |
 
