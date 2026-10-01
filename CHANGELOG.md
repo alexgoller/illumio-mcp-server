@@ -22,6 +22,41 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.0] — 2026-10-01
+
+### Added
+
+- **`build-identity-graph`** — identity-centric view of traffic. Illumio records
+  the account each communicating process ran as, which answers a least-privilege
+  question workload labels cannot: what can this account reach, from how many
+  places, over what period.
+  - **Identity resolution first.** `DOMAIN\user` and `user@realm` resolve to one
+    identity, with the qualifier kept as `seen_as`. On a live estate
+    `CRYSTAL\agarcia` and `agarcia` were one human on a Windows and a Mac
+    endpoint — unresolved, every interactive user was double-counted.
+  - **Service vs interactive**, by construction rather than behaviour, with
+    `classified_because` on every identity so the call can be disputed.
+  - **Time axis** from `first_detected`/`last_detected`: activity window, active
+    days, and `activity_density` — 15 of 17 days is steady use, 2 of 30 is not.
+  - **Findings ranked by how unexpected they are.** Raw thresholds put
+    `root on 235 workloads` first, which is a daemon doing its job; an
+    interactive account on two workloads now outranks it.
+  - Rows with no account are counted, not dropped: a low ratio is a visibility
+    gap, not an absence of activity.
+
+- **Error messages can no longer be empty.** Every handler interpolated
+  `str(e)`, which is the empty string for an exception carrying no message --
+  and the Illumio SDK raises exactly that, so a failure could read
+  `Failed to create ringfence:` with no cause. Found while diagnosing two
+  transient PCE errors whose test output said nothing. 55 call sites now use
+  `describe_error`, which always includes the exception type, with a source
+  guard against reintroducing the pattern.
+
+The output deliberately never says "lateral movement". Flow data cannot
+distinguish that from a service account working normally.
+
+---
+
 ## [0.8.0] — 2026-09-18
 
 ### Added

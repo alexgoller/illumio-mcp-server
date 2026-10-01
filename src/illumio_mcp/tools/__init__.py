@@ -81,6 +81,7 @@ from .credentials import (
     handle_check_pce_credentials_status,
 )
 from .sec_rules import handle_update_sec_rule, handle_delete_sec_rule
+from .identity import handle_build_identity_graph
 from .meta import handle_get_server_changelog
 
 
@@ -124,6 +125,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     # Traffic
     "get-traffic-flows":          ToolSpec(handle_get_traffic_flows,        roles=ALL_ROLES),
     "get-traffic-flows-summary":  ToolSpec(handle_get_traffic_flows_summary,roles=ALL_ROLES),
+    "build-identity-graph":       ToolSpec(handle_build_identity_graph,     roles=ALL_ROLES),
     "discover-process-egress":    ToolSpec(handle_discover_process_egress,    roles=ALL_ROLES),
     "find-unmanaged-traffic":     ToolSpec(handle_find_unmanaged_traffic,   roles=ALL_ROLES, unscopable=True),
     # Policy reports (PCE-wide; not safely scopable)

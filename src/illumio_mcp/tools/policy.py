@@ -9,6 +9,7 @@ from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
 
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 from .traffic import to_dataframe, to_query_start, to_query_end
 from .constants import MCP_QUERY_MAX_RESULTS
 
@@ -342,7 +343,7 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to run compliance check: {str(e)}"
+        error_msg = f"Failed to run compliance check: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -528,7 +529,7 @@ def handle_enforcement_readiness(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to assess enforcement readiness: {str(e)}"
+        error_msg = f"Failed to assess enforcement readiness: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -664,7 +665,7 @@ def handle_get_policy_coverage_report(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to generate policy coverage report: {str(e)}"
+        error_msg = f"Failed to generate policy coverage report: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -743,7 +744,7 @@ def handle_compare_draft_active(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to compare draft vs active: {str(e)}"
+        error_msg = f"Failed to compare draft vs active: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -843,6 +844,6 @@ def handle_get_workload_enforcement_status(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to get enforcement status: {str(e)}"
+        error_msg = f"Failed to get enforcement status: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]

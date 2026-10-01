@@ -4,6 +4,7 @@ import logging
 import mcp.types as types
 
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 from ..service_refs import ServiceRefError, normalise_windows_services
 
 logger = logging.getLogger('illumio_mcp')
@@ -103,7 +104,7 @@ def handle_get_services(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to get services: {str(e)}"
+        error_msg = f"Failed to get services: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -204,7 +205,7 @@ def handle_create_service(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(
             {"error": "invalid_service_definition", "message": str(e)}, indent=2))]
     except Exception as e:
-        error_msg = f"Failed to create service: {str(e)}"
+        error_msg = f"Failed to create service: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -255,7 +256,7 @@ def handle_update_service(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(
             {"error": "invalid_service_definition", "message": str(e)}, indent=2))]
     except Exception as e:
-        error_msg = f"Failed to update service: {str(e)}"
+        error_msg = f"Failed to update service: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -288,6 +289,6 @@ def handle_delete_service(ctx, arguments: dict) -> list:
             text=json.dumps({"message": f"Successfully deleted service {service_href}"}, indent=2)
         )]
     except Exception as e:
-        error_msg = f"Failed to delete service: {str(e)}"
+        error_msg = f"Failed to delete service: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]

@@ -3,6 +3,7 @@ import logging
 import mcp.types as types
 from ..pce import PCE_ORG_ID
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -62,7 +63,7 @@ def handle_get_container_workload_profiles(ctx, arguments: dict) -> list:
             "total_count": len(result)
         }, indent=2))]
     except Exception as e:
-            error_msg = f"Failed to get container workload profiles: {str(e)}"
+            error_msg = f"Failed to get container workload profiles: {describe_error(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -93,7 +94,7 @@ def handle_update_container_workload_profile(ctx, arguments: dict) -> list:
             "updated_fields": list(payload.keys())
         }, indent=2))]
     except Exception as e:
-            error_msg = f"Failed to update container workload profile: {str(e)}"
+            error_msg = f"Failed to update container workload profile: {describe_error(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -139,7 +140,7 @@ def handle_get_kubernetes_workloads(ctx, arguments: dict) -> list:
         }, indent=2))]
     
     except Exception as e:
-            error_msg = f"Failed to get kubernetes workloads: {str(e)}"
+            error_msg = f"Failed to get kubernetes workloads: {describe_error(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -180,6 +181,6 @@ def handle_get_container_clusters(ctx, arguments: dict) -> list:
             "total_count": len(result)
         }, indent=2))]
     except Exception as e:
-            error_msg = f"Failed to get container clusters: {str(e)}"
+            error_msg = f"Failed to get container clusters: {describe_error(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]

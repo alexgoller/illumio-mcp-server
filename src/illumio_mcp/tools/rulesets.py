@@ -3,6 +3,7 @@ import logging
 import mcp.types as types
 from illumio import RuleSet, LabelSet, Rule, AMS, ServicePort
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 from ..service_refs import (
     resolve_ingress_services, windows_qualified_services, consumer_os_warning,
     reject_egress_service_in_ingress, ServiceRefError,
@@ -82,7 +83,7 @@ def handle_get_rulesets(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to get rulesets: {str(e)}"
+        error_msg = f"Failed to get rulesets: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -400,7 +401,7 @@ def handle_create_ruleset(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to create ruleset: {str(e)}"
+        error_msg = f"Failed to create ruleset: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -425,10 +426,10 @@ def handle_update_ruleset(ctx, arguments: dict) -> list:
             try:
                 ruleset = pce.rule_sets.get_by_reference(arguments['href'])
             except Exception as e:
-                logger.error(f"Failed to find ruleset by href: {str(e)}")
+                logger.error(f"Failed to find ruleset by href: {describe_error(e)}")
                 return [types.TextContent(
                     type="text",
-                    text=json.dumps({"error": f"Ruleset not found: {str(e)}"}, indent=2)
+                    text=json.dumps({"error": f"Ruleset not found: {describe_error(e)}"}, indent=2)
                 )]
         else:
             logger.debug(f"Looking up ruleset by name: {arguments['name']}")
@@ -530,7 +531,7 @@ def handle_update_ruleset(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to update ruleset: {str(e)}"
+        error_msg = f"Failed to update ruleset: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -555,10 +556,10 @@ def handle_delete_ruleset(ctx, arguments: dict) -> list:
             try:
                 ruleset = pce.rule_sets.get_by_reference(arguments['href'])
             except Exception as e:
-                logger.error(f"Failed to find ruleset by href: {str(e)}")
+                logger.error(f"Failed to find ruleset by href: {describe_error(e)}")
                 return [types.TextContent(
                     type="text",
-                    text=json.dumps({"error": f"Ruleset not found: {str(e)}"}, indent=2)
+                    text=json.dumps({"error": f"Ruleset not found: {describe_error(e)}"}, indent=2)
                 )]
         else:
             logger.debug(f"Looking up ruleset by name: {arguments['name']}")
@@ -584,7 +585,7 @@ def handle_delete_ruleset(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to delete ruleset: {str(e)}"
+        error_msg = f"Failed to delete ruleset: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -658,6 +659,6 @@ def handle_provision_policy(ctx, arguments: dict) -> list:
         }, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to provision policy: {str(e)}"
+        error_msg = f"Failed to provision policy: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]

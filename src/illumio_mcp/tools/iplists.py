@@ -2,6 +2,7 @@ import json
 import logging
 import mcp.types as types
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -36,7 +37,7 @@ def handle_get_iplists(ctx, arguments: dict) -> list:
             text=json.dumps({"ip_lists": iplist_data, "total_count": len(iplist_data)}, indent=2)
         )]
     except Exception as e:
-        error_msg = f"Failed to get IP lists: {str(e)}"
+        error_msg = f"Failed to get IP lists: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
@@ -121,7 +122,7 @@ def handle_create_iplist(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to create IP List: {str(e)}"
+        error_msg = f"Failed to create IP List: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -146,10 +147,10 @@ def handle_update_iplist(ctx, arguments: dict) -> list:
             try:
                 iplist = pce.ip_lists.get_by_reference(arguments['href'])
             except Exception as e:
-                logger.error(f"Failed to find IP List by href: {str(e)}")
+                logger.error(f"Failed to find IP List by href: {describe_error(e)}")
                 return [types.TextContent(
                     type="text",
-                    text=json.dumps({"error": f"IP List not found: {str(e)}"}, indent=2)
+                    text=json.dumps({"error": f"IP List not found: {describe_error(e)}"}, indent=2)
                 )]
         else:
             logger.debug(f"Looking up IP List by name: {arguments['name']}")
@@ -222,7 +223,7 @@ def handle_update_iplist(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to update IP List: {str(e)}"
+        error_msg = f"Failed to update IP List: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -247,10 +248,10 @@ def handle_delete_iplist(ctx, arguments: dict) -> list:
             try:
                 iplist = pce.ip_lists.get_by_reference(arguments['href'])
             except Exception as e:
-                logger.error(f"Failed to find IP List by href: {str(e)}")
+                logger.error(f"Failed to find IP List by href: {describe_error(e)}")
                 return [types.TextContent(
                     type="text",
-                    text=json.dumps({"error": f"IP List not found: {str(e)}"}, indent=2)
+                    text=json.dumps({"error": f"IP List not found: {describe_error(e)}"}, indent=2)
                 )]
         else:
             logger.debug(f"Looking up IP List by name: {arguments['name']}")
@@ -276,7 +277,7 @@ def handle_delete_iplist(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to delete IP List: {str(e)}"
+        error_msg = f"Failed to delete IP List: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",

@@ -3,6 +3,7 @@ import logging
 import mcp.types as types
 from ..pce import PCE_ORG_ID
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -17,7 +18,7 @@ def handle_check_pce_connection(ctx, arguments: dict) -> list:
             text=f"PCE connection successful: {connection_status}"
         )]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -70,7 +71,7 @@ def handle_get_events(ctx, arguments: dict) -> list:
         )]
 
     except Exception as e:
-        error_msg = f"Failed to get events: {str(e)}"
+        error_msg = f"Failed to get events: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -112,6 +113,6 @@ def handle_get_pairing_profiles(ctx, arguments: dict) -> list:
         }, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to get pairing profiles: {str(e)}"
+        error_msg = f"Failed to get pairing profiles: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]

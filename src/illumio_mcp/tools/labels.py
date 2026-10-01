@@ -1,6 +1,8 @@
 import json
 import logging
 import mcp.types as types
+
+from ..errors import describe_error
 from illumio import Label
 
 logger = logging.getLogger('illumio_mcp')
@@ -47,7 +49,7 @@ def handle_get_labels(ctx, arguments: dict) -> list:
             text=f"Labels: {labels}"
         )]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -67,7 +69,7 @@ def handle_create_label(ctx, arguments: dict) -> list:
             text=f"Label created with status: {label}"
         )]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -93,7 +95,7 @@ def handle_update_label(ctx, arguments: dict) -> list:
                 label = pce.labels.get_by_reference(href)
                 logger.debug(f"Found label by href: {label}")
             except Exception as e:
-                logger.error(f"Failed to find label by href {href}: {str(e)}")
+                logger.error(f"Failed to find label by href {href}: {describe_error(e)}")
                 return [types.TextContent(
                     type="text",
                     text=f"Error: Label with href {href} not found"
@@ -135,7 +137,7 @@ def handle_update_label(ctx, arguments: dict) -> list:
             )]
 
     except Exception as e:
-        error_msg = f"Failed to update label: {str(e)}"
+        error_msg = f"Failed to update label: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -160,7 +162,7 @@ def handle_delete_label(ctx, arguments: dict) -> list:
                 text=f"Label not found"
             )]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",

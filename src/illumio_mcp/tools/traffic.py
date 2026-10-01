@@ -10,6 +10,7 @@ from illumio import TrafficQuery
 
 from ..pce import run_sync
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 from ..ip_match import PrefixMatcher
 from .constants import (
     MCP_BUG_MAX_RESULTS, MCP_QUERY_MAX_RESULTS, MCP_MAX_RESPONSE_BYTES,
@@ -1073,7 +1074,7 @@ def handle_get_traffic_flows(ctx, arguments: dict) -> list:
             text=payload
         )]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -1255,7 +1256,7 @@ def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
 
         return [types.TextContent(type="text", text=payload)]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -1377,7 +1378,7 @@ def handle_find_unmanaged_traffic(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to find unmanaged traffic: {str(e)}"
+        error_msg = f"Failed to find unmanaged traffic: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -1572,6 +1573,6 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
                      "unexpected destination is the interesting case."),
         }, default=str))]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]

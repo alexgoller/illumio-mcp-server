@@ -9,6 +9,7 @@ from illumio.explorer.trafficanalysis import TrafficQueryFilter
 from illumio.util.jsonutils import Reference
 
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 from .traffic import to_dataframe, to_query_start, to_query_end
 from ..label_refs import normalise_label_value
 from ..service_refs import (
@@ -600,7 +601,7 @@ def handle_create_ringfence(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to create ringfence: {str(e)}"
+        error_msg = f"Failed to create ringfence: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -679,7 +680,7 @@ def handle_ringfence_batch(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(output, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed batch ringfence: {str(e)}"
+        error_msg = f"Failed batch ringfence: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -941,7 +942,7 @@ def handle_identify_infrastructure_services(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(output, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to identify infrastructure services: {str(e)}"
+        error_msg = f"Failed to identify infrastructure services: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -1127,6 +1128,6 @@ def handle_detect_lateral_movement_paths(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to detect lateral movement paths: {str(e)}"
+        error_msg = f"Failed to detect lateral movement paths: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
