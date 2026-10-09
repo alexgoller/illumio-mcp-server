@@ -5,12 +5,13 @@ from datetime import datetime, timedelta
 
 import mcp.types as types
 
+from ..errors import describe_error
 from ..identity_graph import build_identity_graph, reach_findings
 from ..log_scrub import ScrubbedArgs
 from .constants import MCP_MAX_RESPONSE_BYTES, MCP_QUERY_MAX_RESULTS
-from .traffic import (fetch_flows_raw, raw_flows_to_dataframe, to_query_start,
-                      to_query_end, _resolve_label_filters, _unresolved_error,
-                      _normalise_filter)
+from .traffic import (classify_destination, fetch_flows_raw, raw_flows_to_dataframe,
+                      to_query_start, to_query_end, _resolve_label_filters,
+                      _unresolved_error, _normalise_filter)
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -36,10 +37,11 @@ def handle_build_identity_graph(ctx, arguments: dict) -> list:
         if problem:
             return [types.TextContent(type="text", text=json.dumps(problem))]
 
+        window = (to_query_start(start), to_query_end(end))
         from illumio.explorer import TrafficQuery
         query = TrafficQuery.build(
-            start_date=to_query_start(start),
-            end_date=to_query_end(end),
+            start_date=window[0],
+            end_date=window[1],
             include_sources=_normalise_filter(arguments.get('include_sources')),
             include_destinations=_normalise_filter(arguments.get('include_destinations')),
             policy_decisions=arguments.get('policy_decisions', []),
@@ -54,9 +56,17 @@ def handle_build_identity_graph(ctx, arguments: dict) -> list:
             include_service_accounts=arguments.get('include_service_accounts', True),
             identity_filter=arguments.get('identity'),
             top=int(arguments.get('top', 10)),
+            attribute=classify_destination,
+            window=window,
         )
         payload = {
-            "window": {"start": start, "end": end},
+            "window": {"start": start, "end": end,
+                       **({"data_span": graph["data_span"]} if graph.get("data_span") else {})},
+            "metrics_note": (
+                "activity_density is an upper bound: active_days counts every day "
+                "a flow row covers, and Explorer aggregates a persistent connection "
+                "into one row. days_with_new_flows is the matching lower bound."
+            ),
             "totals": graph["totals"],
             "findings": reach_findings(graph),
             "identities": graph["identities"],
@@ -91,4 +101,4 @@ def handle_build_identity_graph(ctx, arguments: dict) -> list:
     except Exception as e:
         logger.error("identity graph failed: %s", e, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps(
-            {"error": f"Failed to build identity graph: {e}"}))]
+            {"error": f"Failed to build identity graph: {describe_error(e)}"}))]
