@@ -37,12 +37,14 @@ is context this data cannot supply, so the output never uses the phrase.
 from __future__ import annotations
 
 import collections
+import datetime
 import logging
 import re
 
 logger = logging.getLogger(__name__)
 
 NA = "-"
+ONE_DAY = datetime.timedelta(days=1)
 
 # Accounts that are service identities by construction, not by behaviour.
 _SERVICE_EXACT = {
@@ -145,7 +147,9 @@ class Identity:
             out["first_seen"] = self.first_seen.isoformat()
             out["last_seen"] = self.last_seen.isoformat()
             out["active_days"] = len(self.active_days)
-            span = (self.last_seen - self.first_seen).days + 1
+            # Calendar days, like active_days, so the two are comparable:
+            # 14 Sep 08:00 to 9 Oct 06:00 is 26 days, not 24.9 rounded down.
+            span = (self.last_seen.date() - self.first_seen.date()).days + 1
             out["window_days"] = span
             # A gap between active days and window days is the interesting bit:
             # 2 active days inside a 30-day window is a different story from 28.
@@ -153,17 +157,36 @@ class Identity:
         return out
 
 
+def _present(value) -> bool:
+    """A real value: not None, not the "-" sentinel, not "", not a pandas NaN.
+
+    NaN is truthy and != "-", so the naive `value and value != NA` test let it
+    through. That is how every unmanaged destination rendered as "nan (nan)"
+    and collapsed into one bucket -- for one user the fourth-largest
+    destination, 538,992 connections across 22, 3389, 443 and 445.
+    """
+    if value is None or value == NA or value == "":
+        return False
+    return not (isinstance(value, float) and value != value)
+
+
 def _endpoint(row) -> str:
-    """Destination as app+env where known, else FQDN, IP list, hostname, IP."""
+    """Destination as app+env where known, else FQDN, hostname or IP.
+
+    An IP-list name is context, not identity: ranked above the address it
+    turned every external destination into one bucket called "internet", which
+    is the collapse the nan fix was reported for. It goes in parentheses.
+    """
     app = row.get("dst_app")
-    if app and app != NA:
+    if _present(app):
         env = row.get("dst_env")
-        return f"{app} ({env})" if env and env != NA else str(app)
-    for col in ("dst_fqdn", "dst_ip_lists", "dst_hostname", "dst_ip"):
+        return f"{app} ({env})" if _present(env) else str(app)
+    ip_list = row.get("dst_ip_lists")
+    for col in ("dst_fqdn", "dst_hostname", "dst_ip"):
         value = row.get(col)
-        if value and value != NA:
-            return str(value)
-    return "unknown"
+        if _present(value):
+            return f"{value} ({ip_list})" if _present(ip_list) else str(value)
+    return str(ip_list) if _present(ip_list) else "unknown"
 
 
 def build_identity_graph(df, *, include_service_accounts: bool = True,
@@ -215,8 +238,8 @@ def build_identity_graph(df, *, include_service_accounts: bool = True,
         ident.qualifiers.add(qualifier)
 
         src = row.get("src_hostname")
-        if not src or src == NA:
-            src = row.get("src_ip") or "unknown"
+        if not _present(src):
+            src = row.get("src_ip") if _present(row.get("src_ip")) else "unknown"
         dst = _endpoint(row)
         conns = int(row.get("num_connections") or 0)
 
@@ -225,24 +248,32 @@ def build_identity_graph(df, *, include_service_accounts: bool = True,
         ident.connections += conns
         ident.rows += 1
         port, proto = row.get("port"), row.get("proto")
-        if port not in (None, NA):
-            ident.ports[f"{port}/{proto}" if proto not in (None, NA) else str(port)] += conns
+        if _present(port):
+            ident.ports[f"{port}/{proto}" if _present(proto) else str(port)] += conns
         proc = row.get("process_name")
-        if proc and proc != NA:
+        if _present(proc):
             ident.processes[str(proc).rsplit("\\", 1)[-1].rsplit("/", 1)[-1]] += conns
         decision = row.get("policy_decision")
-        if decision and decision != NA:
+        if _present(decision):
             ident.decisions[str(decision)] += 1
 
-        if first is not None and pos < len(first):
-            ts = first.iloc[pos]
-            if pd.notna(ts):
-                ident.first_seen = ts if ident.first_seen is None else min(ident.first_seen, ts)
-                ident.active_days.add(ts.date())
-        if last is not None and pos < len(last):
-            ts = last.iloc[pos]
-            if pd.notna(ts):
-                ident.last_seen = ts if ident.last_seen is None else max(ident.last_seen, ts)
+        seen_from = first.iloc[pos] if first is not None and pos < len(first) else None
+        seen_to = last.iloc[pos] if last is not None and pos < len(last) else None
+        if seen_from is not None and pd.notna(seen_from):
+            ident.first_seen = (seen_from if ident.first_seen is None
+                                else min(ident.first_seen, seen_from))
+            # Explorer aggregates a persistent connection into ONE row spanning
+            # first_detected..last_detected, so a daemon live for 26 days is one
+            # row, not 26. Count every day the row covers, not the day it began:
+            # counting the start alone made nagios "active on only 1 of 26 days".
+            stop = seen_to.date() if (seen_to is not None and pd.notna(seen_to)
+                                      and seen_to >= seen_from) else seen_from.date()
+            day = seen_from.date()
+            while day <= stop:
+                ident.active_days.add(day)
+                day += ONE_DAY
+        if seen_to is not None and pd.notna(seen_to):
+            ident.last_seen = seen_to if ident.last_seen is None else max(ident.last_seen, seen_to)
 
         key = (account, str(src), dst)
         edge = edges.get(key)
