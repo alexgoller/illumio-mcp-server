@@ -105,8 +105,9 @@ class Identity:
     """One resolved identity and everything observed about it."""
 
     __slots__ = ("account", "qualifiers", "klass", "why", "workloads",
-                 "destinations", "ports", "processes", "connections", "rows",
-                 "first_seen", "last_seen", "active_days", "decisions")
+                 "destinations", "apps", "external", "ports", "processes",
+                 "connections", "rows", "first_seen", "last_seen", "active_days",
+                 "new_flow_days", "decisions")
 
     def __init__(self, account: str):
         self.account = account
@@ -115,6 +116,11 @@ class Identity:
         self.why = ""
         self.workloads: set[str] = set()
         self.destinations: collections.Counter = collections.Counter()
+        # Apps and external addresses are different questions. Counted
+        # together, 40 internet IPs read as "reaches 43 destinations" and the
+        # wide-reach signal fired for 10 of 11 interactive users.
+        self.apps: set[str] = set()
+        self.external: set[str] = set()
         self.ports: collections.Counter = collections.Counter()
         self.processes: collections.Counter = collections.Counter()
         self.connections = 0
@@ -122,14 +128,17 @@ class Identity:
         self.first_seen = None
         self.last_seen = None
         self.active_days: set = set()
+        self.new_flow_days: set = set()
         self.decisions: collections.Counter = collections.Counter()
 
-    def as_dict(self, top: int = 10) -> dict:
+    def as_dict(self, top: int = 10, window_days_bounds=None) -> dict:
         out = {
             "identity": self.account,
             "class": self.klass,
             "classified_because": self.why,
             "observed_on_workloads": len(self.workloads),
+            "distinct_apps": len(self.apps),
+            "external_destinations": len(self.external),
             "distinct_destinations": len(self.destinations),
             "connections": self.connections,
             "flow_rows": self.rows,
@@ -147,13 +156,22 @@ class Identity:
             out["first_seen"] = self.first_seen.isoformat()
             out["last_seen"] = self.last_seen.isoformat()
             out["active_days"] = len(self.active_days)
+            # The lower bound. active_days counts every day a row covers, so
+            # one row of 2 connections spanning 30 days reads 30 of 30; the
+            # distinct days on which rows BEGAN cannot be inflated that way.
+            out["days_with_new_flows"] = len(self.new_flow_days)
             # Calendar days, like active_days, so the two are comparable:
             # 14 Sep 08:00 to 9 Oct 06:00 is 26 days, not 24.9 rounded down.
-            span = (self.last_seen.date() - self.first_seen.date()).days + 1
+            # Clipped to the query window: Explorer returns any aggregate
+            # overlapping it, so a one-day query can carry a six-day row.
+            lo, hi = self.first_seen.date(), self.last_seen.date()
+            if window_days_bounds:
+                lo, hi = max(lo, window_days_bounds[0]), min(hi, window_days_bounds[1])
+            span = max((hi - lo).days + 1, 1)
             out["window_days"] = span
             # A gap between active days and window days is the interesting bit:
             # 2 active days inside a 30-day window is a different story from 28.
-            out["activity_density"] = round(len(self.active_days) / max(span, 1), 2)
+            out["activity_density"] = round(min(len(self.active_days), span) / span, 2)
         return out
 
 
@@ -170,34 +188,59 @@ def _present(value) -> bool:
     return not (isinstance(value, float) and value != value)
 
 
-def _endpoint(row) -> str:
-    """Destination as app+env where known, else FQDN, hostname or IP.
+def _endpoint(row, attribute=None) -> tuple[str, bool]:
+    """Destination name and whether it is an app -> (name, is_app).
 
-    An IP-list name is context, not identity: ranked above the address it
-    turned every external destination into one bucket called "internet", which
-    is the collapse the nan fix was reported for. It goes in parentheses.
+    Apps are app+env. Anything else is external: FQDN, else the provider when
+    `attribute(ip)` names one (seven Anthropic addresses are one destination,
+    not seven; eighteen CloudFront edges are one CDN, and the bucket's name
+    already says it cannot see the SaaS behind it), else hostname or IP. An
+    IP-list name is context,
+    not identity -- ranked above the address it turned every external
+    destination into one bucket called "internet" -- so it goes in parentheses.
     """
     app = row.get("dst_app")
     if _present(app):
         env = row.get("dst_env")
-        return f"{app} ({env})" if _present(env) else str(app)
+        return (f"{app} ({env})" if _present(env) else str(app)), True
     ip_list = row.get("dst_ip_lists")
-    for col in ("dst_fqdn", "dst_hostname", "dst_ip"):
-        value = row.get(col)
+    suffix = f" ({ip_list})" if _present(ip_list) else ""
+    fqdn = row.get("dst_fqdn")
+    if _present(fqdn):
+        return f"{fqdn}{suffix}", False
+    ip = row.get("dst_ip")
+    if attribute is not None and _present(ip):
+        provider, _confidence = attribute(str(ip))
+        if provider:
+            return f"{provider}{suffix}", False
+    for value in (row.get("dst_hostname"), ip):
         if _present(value):
-            return f"{value} ({ip_list})" if _present(ip_list) else str(value)
-    return str(ip_list) if _present(ip_list) else "unknown"
+            return f"{value}{suffix}", False
+    return (str(ip_list) if _present(ip_list) else "unknown"), False
 
 
 def build_identity_graph(df, *, include_service_accounts: bool = True,
-                         identity_filter=None, top: int = 10) -> dict:
+                         identity_filter=None, top: int = 10,
+                         attribute=None, window=None) -> dict:
     """Aggregate a flow frame into identities, their reach, and their timeline.
 
     Rows with no `user_name` are counted and reported rather than dropped: the
     PCE only records an account when the VEN could attribute the flow to one, so
     "how much of this estate has no identity data" is itself an answer.
+
+    `attribute(ip) -> (provider, confidence)` groups external addresses by
+    provider. `window=(start, end)` is the query window the caller asked for:
+    the timeline is measured inside it, and data outside it is disclosed.
     """
     import pandas as pd
+
+    win_lo = win_hi = None
+    if window and window[0] and window[1]:
+        win_lo = pd.Timestamp(window[0]).tz_convert("UTC") if pd.Timestamp(window[0]).tzinfo \
+            else pd.Timestamp(window[0]).tz_localize("UTC")
+        win_hi = pd.Timestamp(window[1]).tz_convert("UTC") if pd.Timestamp(window[1]).tzinfo \
+            else pd.Timestamp(window[1]).tz_localize("UTC")
+    day_bounds = (win_lo.date(), win_hi.date()) if win_lo is not None else None
 
     wanted = None
     if identity_filter:
@@ -240,11 +283,12 @@ def build_identity_graph(df, *, include_service_accounts: bool = True,
         src = row.get("src_hostname")
         if not _present(src):
             src = row.get("src_ip") if _present(row.get("src_ip")) else "unknown"
-        dst = _endpoint(row)
+        dst, is_app = _endpoint(row, attribute)
         conns = int(row.get("num_connections") or 0)
 
         ident.workloads.add(str(src))
         ident.destinations[dst] += conns
+        (ident.apps if is_app else ident.external).add(dst)
         ident.connections += conns
         ident.rows += 1
         port, proto = row.get("port"), row.get("proto")
@@ -269,6 +313,9 @@ def build_identity_graph(df, *, include_service_accounts: bool = True,
             stop = seen_to.date() if (seen_to is not None and pd.notna(seen_to)
                                       and seen_to >= seen_from) else seen_from.date()
             day = seen_from.date()
+            ident.new_flow_days.add(day)
+            if day_bounds:
+                day, stop = max(day, day_bounds[0]), min(stop, day_bounds[1])
             while day <= stop:
                 ident.active_days.add(day)
                 day += ONE_DAY
@@ -285,7 +332,9 @@ def build_identity_graph(df, *, include_service_accounts: bool = True,
             edge["ports"].add(str(port))
 
     ranked = sorted(identities.values(), key=lambda i: -i.connections)
+    data_span = _data_span(first, last, win_lo, win_hi)
     return {
+        **({"data_span": data_span} if data_span else {}),
         "totals": {
             "flow_rows": rows_total,
             "rows_with_identity": rows_total - rows_without_identity,
@@ -295,10 +344,36 @@ def build_identity_graph(df, *, include_service_accounts: bool = True,
             "service": sum(1 for i in ranked if i.klass == "service"),
             "edges": len(edges),
         },
-        "identities": [i.as_dict(top=top) for i in ranked],
+        "identities": [i.as_dict(top=top, window_days_bounds=day_bounds) for i in ranked],
         "edges": [{**e, "ports": sorted(e["ports"])} for e in
                   sorted(edges.values(), key=lambda e: -e["connections"])],
     }
+
+
+def _data_span(first, last, win_lo, win_hi) -> dict | None:
+    """Where the returned rows actually sit in time, against the query window.
+
+    Explorer keeps older flows in multi-day aggregates and returns any that
+    overlap the window, so a one-day query for 27 Sep came back with rows
+    starting 22 Sep and 1.67M connections -- labelled as 27 Sep. The label was
+    the lie; the data is what it is, and the caller needs to know which.
+    """
+    if first is None or last is None or win_lo is None:
+        return None
+    earliest, latest = first.min(), last.max()
+    if not (earliest == earliest and latest == latest):      # all NaT
+        return None
+    before, after = bool(earliest < win_lo), bool(latest > win_hi)
+    span = {"earliest": earliest.isoformat(), "latest": latest.isoformat(),
+            "extends_before_window": before, "extends_after_window": after}
+    if before or after:
+        span["note"] = (
+            "Rows extend outside the requested window: Explorer stores older "
+            "flows as multi-day aggregates and returns any that overlap it. "
+            "Connection counts on those rows cover the whole aggregate, not just "
+            "the window; active_days and window_days are clipped to the window."
+        )
+    return span
 
 
 def reach_findings(graph: dict, *, workload_threshold: int = 10,
@@ -335,10 +410,13 @@ def reach_findings(graph: dict, *, workload_threshold: int = 10,
             signals.append(("review",
                 f"{blocked} flow(s) from this identity are already blocked by policy"))
 
-        if item["class"] == "interactive" and item["distinct_destinations"] >= destination_threshold:
+        # Apps, not addresses: 40 internet IPs are not 40 places to reach into
+        # the estate, and counted as such this fired for 10 of 11 users.
+        apps = item.get("distinct_apps", item["distinct_destinations"])
+        if item["class"] == "interactive" and apps >= destination_threshold:
             signals.append(("note",
-                f"interactive account reaches {item['distinct_destinations']} distinct "
-                f"destinations -- wide for a single user"))
+                f"interactive account reaches {apps} distinct apps -- wide for a "
+                f"single user"))
 
         density = item.get("activity_density")
         if density is not None and density <= 0.2 and item["connections"] > 0:
@@ -362,6 +440,8 @@ def reach_findings(graph: dict, *, workload_threshold: int = 10,
             "why_surfaced": [text for _lvl, text in
                              sorted(signals, key=lambda s: INTEREST[s[0]])],
             "observed_on_workloads": item["observed_on_workloads"],
+            "distinct_apps": item.get("distinct_apps"),
+            "external_destinations": item.get("external_destinations"),
             "distinct_destinations": item["distinct_destinations"],
             "connections": item["connections"],
         })

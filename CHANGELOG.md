@@ -22,6 +22,54 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.2] — 2026-10-09
+
+Follow-up to 0.9.1 from the same live session. Splitting the `nan (nan)`
+bucket into real addresses moved the problem rather than solving it.
+
+### Fixed
+
+- **"Wide for a single user" fired for 10 of 11 interactive users.** Each
+  internet address counted as a destination, so `distinct_destinations` went
+  from 8-12 per user to 113-126 against a threshold of 10. Apps and external
+  destinations are now counted apart: `distinct_apps` (app+env, reach into the
+  estate) drives the finding; `external_destinations` is reported beside it.
+  External addresses group by provider when attributable, CDN edges included
+  (`anthropic (internet)`, `aws-cloudfront (internet)`) -- seven Anthropic
+  addresses are one destination, eighteen CloudFront edges are one CDN. Live:
+  the finding now fires for 1 of 11, the one user on 11 apps.
+
+- **A narrow window is no longer labelled as if the data fit it.** Explorer
+  stores older flows as multi-day aggregates and returns any that overlap the
+  window: a one-day query for 27 Sep came back with rows from 22 Sep and 1.67M
+  connections, labelled 27 Sep. `window.data_span` now reports the earliest
+  and latest timestamps actually returned and whether they extend outside the
+  window, with a note that connection counts on such rows cover the whole
+  aggregate. `active_days` and `window_days` are clipped to the window.
+
+### Added
+
+- **`days_with_new_flows`** per identity: distinct days on which flow rows
+  began. `active_days` counts every day a row covers, so one row of 2
+  connections spanning 30 days reads 30 of 30 -- an upper bound. This is the
+  lower bound, and `metrics_note` on the response says which is which.
+
+### Unlearn
+
+- **The wide-reach finding reads "reaches N distinct apps"**, keyed on
+  `distinct_apps`, not `distinct_destinations`. The latter is still present and
+  still the union, but it is no longer a threshold input.
+- **External destinations are named by provider when known.** A session that
+  learned to read `160.79.105.10 (internet)` will now see `anthropic
+  (internet)`; the address is still in `get-traffic-flows`.
+- **`activity_density` of 1.0 across an estate is not a defect** when every
+  account is a steady daily user. Read `days_with_new_flows` alongside it.
+- **An identity-graph response may now carry `window.data_span`.** If
+  `extends_before_window` is true, `connections` includes traffic from before
+  the window you asked for.
+
+---
+
 ## [0.9.1] — 2026-10-09
 
 Four defects reported by a Claude session driving the server against a live

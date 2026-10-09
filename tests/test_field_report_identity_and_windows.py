@@ -163,3 +163,117 @@ def test_same_day_window_is_fine():
                            max_results=10, query_name="same-day")
     with pytest.raises(AttributeError):      # reached .post on the FakePCE
         fetch_flows_raw(FakePCE(), q, "same-day")
+
+
+# ===========================================================================
+# Second report, after 0.9.1 split the external bucket into real addresses.
+# ===========================================================================
+
+# --- 5. "wide for a single user" fired for 10 of 11 interactive users -------
+
+def _external(ip, **over):
+    nan = float("nan")
+    return {"dst_app": nan, "dst_env": nan, "dst_ip": ip, "dst_ip_lists": "internet", **over}
+
+
+def test_external_addresses_are_not_counted_as_apps():
+    """Reported: distinct_destinations went from 8-12 per user to 119-126
+    against a threshold of 10, so the signal fired for everyone. Apps and
+    external addresses are different questions; count them apart."""
+    rows = [{"dst_app": f"app{i}", "dst_env": "Production"} for i in range(3)]
+    rows += [_external(f"203.0.113.{i}") for i in range(1, 41)]
+    g = build_identity_graph(_frame(rows))
+    ident = g["identities"][0]
+    assert ident["distinct_apps"] == 3
+    assert ident["external_destinations"] == 40
+    assert ident["distinct_destinations"] == 43      # unchanged meaning: the union
+    texts = [t for f in reach_findings(g) for t in f["why_surfaced"]]
+    assert not any("wide for a single user" in t for t in texts)
+
+
+def test_wide_reach_still_fires_on_apps():
+    rows = [{"dst_app": f"app{i}", "dst_env": "Production"} for i in range(12)]
+    g = build_identity_graph(_frame(rows))
+    texts = [t for f in reach_findings(g) for t in f["why_surfaced"]]
+    assert any("12 distinct apps" in t and "wide for a single user" in t for t in texts)
+
+
+def test_attributable_external_addresses_group_by_provider():
+    """agarcia: 226 of 241 edges were single internet IPs. Seven of them were
+    Anthropic's; one destination, not seven. CDN edges group too: eighteen
+    CloudFront addresses are one place, and the bucket name says what it is."""
+    def attribute(ip):
+        return {"160.79.105.10": ("anthropic", "likely"),
+                "160.79.105.100": ("anthropic", "likely"),
+                "104.18.3.205": ("cloudflare-fronted", "ambiguous")}.get(ip, (None, None))
+    g = build_identity_graph(_frame([
+        _external("160.79.105.10", num_connections=5),
+        _external("160.79.105.100", num_connections=7),
+        _external("104.18.3.205"),
+        _external("198.51.100.9"),
+    ]), attribute=attribute)
+    ident = g["identities"][0]
+    by_name = {d["to"]: d["connections"] for d in ident["destinations"]}
+    assert by_name["anthropic (internet)"] == 12
+    assert "cloudflare-fronted (internet)" in by_name and "198.51.100.9 (internet)" in by_name
+    assert ident["external_destinations"] == 3
+    assert sum(1 for e in g["edges"] if e["to"] == "anthropic (internet)") == 1
+
+
+# --- 6. a narrow window returned data from outside it ----------------------
+
+def test_aggregates_overlapping_the_window_are_clipped_and_disclosed():
+    """Reported: a one-day query for 27 Sep came back with first_seen 22 Sep,
+    window_days 6 and 1.67M connections, labelled as 27 Sep only. Explorer
+    stores older flows in multi-day aggregates and returns any that overlap.
+    The window the caller asked for is the one the timeline is measured in."""
+    g = build_identity_graph(_frame([
+        {"first_detected": "2026-09-22T10:00:00Z", "last_detected": "2026-09-27T09:00:00Z",
+         "num_connections": 1_670_000},
+    ]), window=("2026-09-27T00:00:00Z", "2026-09-27T23:59:59Z"))
+    ident = g["identities"][0]
+    assert ident["first_seen"].startswith("2026-09-22")      # the data fact, kept
+    assert (ident["active_days"], ident["window_days"]) == (1, 1)
+    span = g["data_span"]
+    assert span["earliest"].startswith("2026-09-22") and span["extends_before_window"]
+    assert not span["extends_after_window"]
+    assert "aggregate" in span["note"]
+
+
+def test_data_inside_the_window_carries_no_disclosure():
+    g = build_identity_graph(_frame([{}]), window=("2026-09-01T00:00:00Z", "2026-09-01T23:59:59Z"))
+    assert "data_span" not in g or not g["data_span"].get("extends_before_window")
+
+
+def test_window_handler_passes_the_window_through(monkeypatch):
+    from illumio_mcp.tools import identity as identity_tool
+    captured = {}
+    def fake_build(df, **kw):
+        captured.update(kw)
+        return {"totals": {"rows_with_identity": 0}, "identities": [], "edges": [],
+                "data_span": {"earliest": "2026-09-22T10:00:00+00:00",
+                              "latest": "2026-09-27T09:00:00+00:00",
+                              "extends_before_window": True, "extends_after_window": False,
+                              "note": "aggregate"}}
+    monkeypatch.setattr(identity_tool, "fetch_flows_raw", lambda *a, **k: [])
+    monkeypatch.setattr(identity_tool, "raw_flows_to_dataframe", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(identity_tool, "build_identity_graph", fake_build)
+    out = json.loads(identity_tool.handle_build_identity_graph(
+        ToolContext(pce=FakePCE(), is_stdio=True),
+        {"start_date": "2026-09-27", "end_date": "2026-09-27"})[0].text)
+    assert captured["window"] == ("2026-09-27T00:00:00Z", "2026-09-27T23:59:59Z")
+    assert out["window"]["start"] == "2026-09-27" and out["window"]["data_span"]["extends_before_window"]
+
+
+# --- 7. activity_density is an upper bound ----------------------------------
+
+def test_days_with_new_flows_is_reported_as_the_lower_bound():
+    """Reported: one row with 2 connections spanning 30 days reads 30 of 30.
+    True, and inherent in aggregated data. Report the other bound too."""
+    g = build_identity_graph(_frame([
+        {"first_detected": "2026-09-01T00:00:00Z", "last_detected": "2026-09-30T00:00:00Z",
+         "num_connections": 2},
+    ]))
+    ident = g["identities"][0]
+    assert ident["active_days"] == 30
+    assert ident["days_with_new_flows"] == 1

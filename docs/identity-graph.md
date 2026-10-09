@@ -57,15 +57,26 @@ disagree with the call.
 { "identity": "agarcia",
   "class": "interactive",
   "observed_on_workloads": 2,
-  "distinct_destinations": 8,
+  "distinct_apps": 7,
+  "external_destinations": 44,
+  "distinct_destinations": 51,
   "first_seen": "2026-09-15T00:00:28Z",
   "last_seen":  "2026-10-01T23:59:35Z",
   "active_days": 15,
+  "days_with_new_flows": 13,
   "window_days": 17,
   "activity_density": 0.88,
   "processes": ["chrome.exe", "Cursor.exe", "Google Chrome",
                 "Microsoft Remote Desktop", "ssh", "mstsc.exe"] }
 ```
+
+**Apps and external destinations are counted apart.** `distinct_apps` is reach
+into the estate (app+env identities) and is what the wide-reach finding keys
+on. `external_destinations` is everything else — FQDN, or the provider when
+the address is attributable (`anthropic (internet)`, `aws-cloudfront
+(internet)`), else the bare address with its IP list in parentheses. Counted
+together, 40 internet addresses read as "reaches 43 destinations" and the
+finding fired for 10 of 11 users.
 
 **`activity_density`** is the ratio that carries the signal: 15 active days in a
 17-day window is steady use; 2 in 30 is intermittent, and worth a different
@@ -73,6 +84,12 @@ question. A day is active if any flow attributed to the identity was live on
 it -- Explorer aggregates a persistent connection into one row spanning
 `first_detected..last_detected`, so a daemon connected for 26 days counts 26
 days, not the one it started on.
+
+That makes it an **upper bound**: one row of 2 connections spanning 30 days
+also reads 30 of 30. `days_with_new_flows` — distinct days on which rows began
+— is the matching lower bound. On an estate where every account is a steady
+daily user, both sit near the window length and nothing is intermittent; that
+is the data, not a defect.
 
 The process list often tells the story on its own — `chrome.exe` and `mstsc.exe`
 alongside `Google Chrome` and `Microsoft Remote Desktop` is one person working
@@ -89,13 +106,34 @@ interest level:
 | Interest | Surfaced when |
 |---|---|
 | `review` | an interactive account acts from several workloads, or any of its flows are already blocked |
-| `note` | an interactive account reaches unusually many destinations; intermittent activity |
+| `note` | an interactive account reaches unusually many apps; intermittent activity |
 | `expected` | a service account on many workloads — normal, but this is the blast radius if it is compromised |
 
 **Nothing here is a verdict.** A backup agent on 200 workloads is correct; an
 interactive account on 200 is a question. The output says what was observed and
 why it was surfaced, and the phrase "lateral movement" is deliberately absent —
 this data cannot distinguish that from a service doing its job.
+
+---
+
+## The window you asked for is not always the window you get
+
+Explorer stores older flows as multi-day aggregates and returns any that
+overlap the query window. A one-day query for 27 Sep came back with rows
+starting 22 Sep and 1.67M connections — the aggregate's total, not the day's.
+The response says so rather than labelling it 27 Sep:
+
+```json
+"window": { "start": "2026-09-27", "end": "2026-09-27",
+            "data_span": { "earliest": "2026-09-21T00:00:00+00:00",
+                           "latest":   "2026-09-27T23:59:59+00:00",
+                           "extends_before_window": true,
+                           "extends_after_window": false,
+                           "note": "Rows extend outside the requested window ..." } }
+```
+
+`active_days` and `window_days` are clipped to the requested window;
+`first_seen`/`last_seen` and `connections` are left as the data reports them.
 
 ---
 
