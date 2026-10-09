@@ -8,6 +8,7 @@ from illumio import Label, Workload, Interface
 from ..label_refs import resolve_label_refs, encode_label_filter
 from .constants import MCP_MAX_RESPONSE_BYTES
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 
 logger = logging.getLogger('illumio_mcp')
 
@@ -205,7 +206,7 @@ def handle_get_workloads(ctx, arguments: dict) -> list:
 
         return [types.TextContent(type="text", text=payload)]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
@@ -255,7 +256,7 @@ def handle_create_workload(ctx, arguments: dict) -> list:
             text=f"Workload created with status: {status}, workload: {workload}"
         )]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(
             type="text",
@@ -321,7 +322,7 @@ def handle_update_workload(ctx, arguments: dict) -> list:
             text=json.dumps({"message": f"Successfully updated workload {workload_obj.href}", "updated_fields": list(update_data.keys())}, indent=2)
         )]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
 
@@ -348,6 +349,6 @@ def handle_delete_workload(ctx, arguments: dict) -> list:
         else:
             return [types.TextContent(type="text", text=json.dumps({"error": "Workload not found"}))]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {str(e)}"
+        error_msg = f"Failed in PCE operation: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]

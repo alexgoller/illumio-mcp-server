@@ -43,6 +43,36 @@ class PCECredentials:
     tls_verify: bool = True
 
 
+
+def _install_async_query_resilience(pce: PolicyComputeEngine) -> None:
+    """Replace the SDK's async poll with one that tolerates a PCE race.
+
+    illumio's PolicyComputeEngine._async_poll has a completed branch of
+
+        elif poll_status == 'completed':
+            collection_href = poll_result['result']
+
+    and the PCE can report `status: completed` a moment BEFORE `result` is
+    populated. The SDK turns that into `KeyError: 'result'`, which reaches the
+    caller as a failed traffic query on perfectly valid input.
+
+    It was observed intermittently across several full-suite runs, failing a
+    DIFFERENT tool each time -- ringfence, then infrastructure services -- which
+    is exactly why it read as "the PCE is unstable" instead of as one fixable
+    race. The empty-message problem hid it further: until error reporting
+    followed the exception chain, the symptom was a message with no cause at all.
+
+    Patched on the instance rather than the class so it cannot leak into
+    unrelated SDK users in the same process, and applied here so every caller
+    benefits -- our own fetch_flows_raw and the SDK's own
+    get_traffic_flows_async alike.
+    """
+    from .tools.traffic import poll_async_query
+
+    def _poll(job_location: str, retry_time=1.0) -> str:
+        return poll_async_query(pce, job_location)
+
+    pce._async_poll = _poll
 def build_pce_for(creds: PCECredentials) -> PolicyComputeEngine:
     """Construct a fresh PolicyComputeEngine. Does NOT cache.
 
@@ -50,6 +80,7 @@ def build_pce_for(creds: PCECredentials) -> PolicyComputeEngine:
     in Phase 3 — the same process talks to PCE as multiple users concurrently.
     """
     pce = PolicyComputeEngine(creds.host, port=creds.port, org_id=creds.org_id)
+    _install_async_query_resilience(pce)
     pce.set_credentials(creds.api_key, creds.api_secret)
     pce._session.verify = creds.tls_verify
     return pce

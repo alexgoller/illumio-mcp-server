@@ -12,6 +12,7 @@ import logging
 import mcp.types as types
 
 from ..log_scrub import ScrubbedArgs
+from ..errors import describe_error
 from ..service_refs import (
     resolve_ingress_services, consumer_os_warning,
     reject_egress_service_in_ingress, ServiceRefError,
@@ -135,7 +136,7 @@ def handle_update_sec_rule(ctx, arguments: dict) -> list:
         return [types.TextContent(type="text", text=json.dumps(response, indent=2))]
 
     except Exception as e:
-        error_msg = f"Failed to update rule: {str(e)}"
+        error_msg = f"Failed to update rule: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 
@@ -159,6 +160,6 @@ def handle_delete_sec_rule(ctx, arguments: dict) -> list:
             "note": "Draft policy changed. Provision to make it active.",
         }, indent=2))]
     except Exception as e:
-        error_msg = f"Failed to delete rule: {str(e)}"
+        error_msg = f"Failed to delete rule: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
         return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]

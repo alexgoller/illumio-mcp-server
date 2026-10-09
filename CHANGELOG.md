@@ -22,6 +22,88 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.0] — 2026-10-01
+
+### Added
+
+- **`build-identity-graph`** — identity-centric view of traffic. Illumio records
+  the account each communicating process ran as, which answers a least-privilege
+  question workload labels cannot: what can this account reach, from how many
+  places, over what period.
+  - **Identity resolution first.** `DOMAIN\user` and `user@realm` resolve to one
+    identity, with the qualifier kept as `seen_as`. On a live estate
+    `CRYSTAL\agarcia` and `agarcia` were one human on a Windows and a Mac
+    endpoint — unresolved, every interactive user was double-counted.
+  - **Service vs interactive**, by construction rather than behaviour, with
+    `classified_because` on every identity so the call can be disputed.
+  - **Time axis** from `first_detected`/`last_detected`: activity window, active
+    days, and `activity_density` — 15 of 17 days is steady use, 2 of 30 is not.
+  - **Findings ranked by how unexpected they are.** Raw thresholds put
+    `root on 235 workloads` first, which is a daemon doing its job; an
+    interactive account on two workloads now outranks it.
+  - Rows with no account are counted, not dropped: a low ratio is a visibility
+    gap, not an absence of activity.
+
+- **Error messages can no longer be empty, and now name the real cause.** Every
+  handler interpolated `str(e)`, which is the empty string for an exception
+  carrying no message -- and the Illumio SDK raises exactly that, so a failure
+  read `Failed to create ringfence:` with nothing after the colon. 55 call sites
+  now use `describe_error`, with a source guard against reintroducing `str(e)`.
+
+  It also follows the cause chain, because the SDK does `raise
+  IllumioApiException(message) from e` and leaves the real HTTP error in
+  `__cause__`:
+
+      before   Failed to create ringfence:
+      then     Failed to create ringfence: IllumioApiException (no detail provided)
+      now      ... IllumioApiException (no detail provided) <- HTTPError: 502 Bad Gateway
+
+  Found by diagnosing two transient PCE failures whose output said nothing at
+  all.
+
+### Fixed
+
+- **Transient PCE failures on async traffic queries no longer surface as failed
+  analyses.** Two distinct conditions, both measured live and both previously
+  reaching the caller with no explanation at all:
+  - `POST /traffic_flows/async_queries` returns **502 Bad Gateway** roughly once
+    per 600 queries. Now retried up to 3 times with backoff, and only for
+    502/503/504 -- a 4xx is never retried, because a rejected query is rejected
+    for a reason.
+  - The SDK's `_async_poll` raises `KeyError: 'result'` when the PCE reports
+    `status: completed` a moment before `result` is populated. Now polled
+    through for a bounded grace period.
+
+  Both are installed on the PCE instance, so every caller benefits -- our
+  `fetch_flows_raw` and the SDK's own `get_traffic_flows_async`, which the
+  ringfence and infrastructure-services tools use. These showed up as a
+  different integration test failing on each full-suite run, which read as "the
+  PCE is flaky" until error reporting followed the exception chain and named the
+  actual 502.
+
+- **Ringfence integration tests no longer leave policy behind.** Both
+  create-ringfence tests target pos/Staging and so produced the same
+  `RF-pos-Staging`, which they deliberately did not delete. Creating a ringfence
+  changes the PCE's computed `policy_decision`, and the dry-run tests assert on
+  exactly that, so a leftover ruleset silently changed what later tests
+  observed. Cleaned up at both ends; `ILLUMIO_KEEP_TEST_RULESETS=1` preserves it
+  for inspection.
+
+### Security
+
+- **Dependency floors raised for 18 advisories** found by the weekly OSV check,
+  all published since the last audit: **pyjwt 2.13.0 -> 2.15.0** (13 advisories
+  including CRITICAL; one describes `PyJWKClient` amplifying unauthenticated
+  JWKS fetches on an unknown `kid`, which is code this server runs),
+  **urllib3 2.7.0 -> 2.8.0** (3, HIGH), and **anyio -> 4.14.2** (2, including
+  CRITICAL). anyio had no floor at all -- it arrives transitively via
+  mcp/starlette, so nothing pinned it. OSV: 18 advisories -> 0.
+
+The output deliberately never says "lateral movement". Flow data cannot
+distinguish that from a service account working normally.
+
+---
+
 ## [0.8.0] — 2026-09-18
 
 ### Added

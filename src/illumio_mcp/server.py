@@ -2443,6 +2443,45 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="build-identity-graph",
+            description=(
+                "Identity-centric view of traffic: which ACCOUNT the communicating "
+                "process ran as, which workloads it acted from, what it reached, and "
+                "over what period. Answers least-privilege questions that workload "
+                "labels cannot -- what can this account reach, and from how many "
+                "places. Resolves DOMAIN\\user and user@realm to one identity, so a "
+                "person appearing as both CRYSTAL\\jdoe and jdoe is not counted twice. "
+                "Classifies service accounts (root, SYSTEM, mysql) separately from "
+                "interactive ones, because wide host spread is normal for a daemon and "
+                "notable for a person. Findings are ranked by how unexpected they are, "
+                "and are observations, not verdicts."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD; defaults to lookback_days ago"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD; defaults to today"},
+                    "lookback_days": {"type": "integer", "description": "Used when start_date is omitted (default 30)"},
+                    "identity": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Restrict to these accounts. Domain-qualified or bare both work: 'CRYSTAL\\jdoe' and 'jdoe' select the same identity."
+                    },
+                    "include_service_accounts": {
+                        "type": "boolean",
+                        "description": "Include daemon accounts (root, SYSTEM, mysql, ...). Default true. Set false to look only at interactive users."
+                    },
+                    "include_edges": {
+                        "type": "boolean",
+                        "description": "Include the identity -> workload -> destination edges. Capped at 400, ranked by connections; the identity rollup answers most questions without them."
+                    },
+                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Label filters, e.g. ['app=vdi']"},
+                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Label filters on the destination side"},
+                    "policy_decisions": {"type": "array", "items": {"type": "string"}, "description": "allowed, blocked, potentially_blocked"},
+                    "top": {"type": "integer", "description": "Destinations/ports/processes listed per identity (default 10)"},
+                },
+            }
+        ),
+        types.Tool(
             name="get-traffic-flows-summary",
             description="Summarize traffic flows as structured JSON. Sections: by_process (which binary talks to which destination, on which port, under which policy, and as which user), external_destinations (traffic leaving the managed estate), blocked (what policy is stopping), app_to_app (coarse view). Prefer this over get-traffic-flows for analysis - it is far smaller and answers the usual questions directly.",
             inputSchema={
