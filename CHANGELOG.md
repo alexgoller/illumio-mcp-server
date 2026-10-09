@@ -43,6 +43,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     interactive account on two workloads now outranks it.
   - Rows with no account are counted, not dropped: a low ratio is a visibility
     gap, not an absence of activity.
+  - The output deliberately never says "lateral movement" -- flow data cannot
+    distinguish that from a service account working normally. A test asserts it.
 
 - **Error messages can no longer be empty, and now name the real cause.** Every
   handler interpolated `str(e)`, which is the empty string for an exception
@@ -63,23 +65,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Transient PCE failures on async traffic queries no longer surface as failed
-  analyses.** Two distinct conditions, both measured live and both previously
-  reaching the caller with no explanation at all:
-  - `POST /traffic_flows/async_queries` returns **502 Bad Gateway** roughly once
-    per 600 queries. Now retried up to 3 times with backoff, and only for
-    502/503/504 -- a 4xx is never retried, because a rejected query is rejected
-    for a reason.
-  - The SDK's `_async_poll` raises `KeyError: 'result'` when the PCE reports
-    `status: completed` a moment before `result` is populated. Now polled
-    through for a bounded grace period.
+- **Async traffic queries no longer fail on the SDK's poll race.** The SDK's
+  `_async_poll` raises `KeyError: 'result'` when the PCE reports
+  `status: completed` a moment before `result` is populated -- measured live,
+  and previously reaching the caller with no explanation at all. The poll now
+  treats completed-without-result as "not ready yet" for a bounded grace period
+  (30s), and a PCE-reported `status: failed` is terminal rather than retried.
 
-  Both are installed on the PCE instance, so every caller benefits -- our
+  Installed on the PCE instance, so every caller benefits -- our
   `fetch_flows_raw` and the SDK's own `get_traffic_flows_async`, which the
-  ringfence and infrastructure-services tools use. These showed up as a
-  different integration test failing on each full-suite run, which read as "the
-  PCE is flaky" until error reporting followed the exception chain and named the
-  actual 502.
+  ringfence and infrastructure-services tools use. Otherwise faithful to the
+  SDK: it still sleeps before the first poll and has no overall deadline. A
+  first version of this fix polled immediately and capped the query at 30s; it
+  failed tests that unmodified `main` passes, which is now covered by two
+  regression tests.
+
+  A submission retry on **502** was tried during this work and deliberately
+  **not** shipped: a 502 on a POST can mean the request succeeded and only the
+  response was lost, so retrying a mutation could write policy twice.
 
 - **Ringfence integration tests no longer leave policy behind.** Both
   create-ringfence tests target pos/Staging and so produced the same
@@ -98,9 +101,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   **urllib3 2.7.0 -> 2.8.0** (3, HIGH), and **anyio -> 4.14.2** (2, including
   CRITICAL). anyio had no floor at all -- it arrives transitively via
   mcp/starlette, so nothing pinned it. OSV: 18 advisories -> 0.
-
-The output deliberately never says "lateral movement". Flow data cannot
-distinguish that from a service account working normally.
 
 ---
 
