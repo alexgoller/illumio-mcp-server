@@ -2,6 +2,7 @@ import ipaddress
 import json
 import logging
 import pathlib
+import time
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -327,6 +328,79 @@ def _normalise_filter(value):
     return [items]
 
 
+
+# How long to keep polling a query the PCE calls "completed" but has not yet
+# given a result href for, and how long between attempts.
+ASYNC_RESULT_GRACE_SECONDS = 30
+ASYNC_POLL_INTERVAL_SECONDS = 1.0
+
+
+
+def poll_async_query(pce, query_href: str, *, grace: float = ASYNC_RESULT_GRACE_SECONDS) -> str:
+    """Wait for an async query and return its collection href.
+
+    Behaves like the SDK's `_async_poll` in every respect but one. That matters:
+    an earlier version of this function differed in two ways and broke tests
+    that pass on the SDK's version.
+
+      It polled IMMEDIATELY instead of sleeping first. The PCE can report a
+      transient state in the moment after submission -- including
+      `status: failed` -- which the SDK's one-second wait never observes. That
+      produced "PCE reported the async query failed" on queries that were fine,
+      and I spent a while blaming the PCE for it.
+
+      It imposed a 30s deadline on the WHOLE query. The SDK has none, on
+      purpose: a wide traffic query legitimately takes minutes, and a deadline
+      turns a slow answer into no answer.
+
+    The one deliberate difference: when the PCE reports `completed` but has not
+    yet written `result`, the SDK raises `KeyError: 'result'`. That is a real
+    race and the reason this function exists -- it is treated as "not ready
+    yet" and polled through for a bounded grace period.
+    """
+    retry_time = 1.0
+    completed_without_result_since = None
+
+    while True:
+        # Sleep FIRST, as the SDK does. See the docstring.
+        time.sleep(retry_time)
+        retry_time = min(retry_time * 1.5, 10.0)
+
+        response = pce.get(query_href)
+        response.raise_for_status()
+        body = response.json()
+        status = body.get("status")
+
+        if status == "failed":
+            detail = body.get("result") if isinstance(body.get("result"), dict) else {}
+            raise RuntimeError(
+                f"PCE reported the async query failed: "
+                f"{detail.get('message') or 'no message given'}"
+            )
+
+        if status in ("completed", "done"):
+            result = body.get("result")
+            if isinstance(result, str) and result:
+                return result
+            if isinstance(result, dict) and result.get("href"):
+                return result["href"]
+
+            # Completed with no href yet: the race this function exists for.
+            now = time.monotonic()
+            if completed_without_result_since is None:
+                completed_without_result_since = now
+                logger.debug("async query %s is %s with no result yet; waiting",
+                             query_href, status)
+            elif now - completed_without_result_since >= grace:
+                raise RuntimeError(
+                    f"PCE reported the async query {status!r} but produced no "
+                    f"result href within {grace:.0f}s of doing so. This is a "
+                    f"PCE-side race; retrying the call usually succeeds."
+                )
+        # No overall deadline, deliberately -- the SDK has none and a wide
+        # traffic query can legitimately run for minutes.
+
+
 def fetch_flows_raw(pce, traffic_query, query_name: str, meta: dict | None = None) -> list:
     """Run an async Explorer query and return the raw JSON flow dicts.
 
@@ -348,7 +422,7 @@ def fetch_flows_raw(pce, traffic_query, query_name: str, meta: dict | None = Non
     )
     response.raise_for_status()
     query_href = response.json()['href']
-    collection_href = pce._async_poll(query_href)
+    collection_href = poll_async_query(pce, query_href)
     collection = pce.get(collection_href)
     collection.raise_for_status()
     flows = collection.json()

@@ -62,3 +62,63 @@ def test_no_handler_still_interpolates_bare_str_e():
         "use describe_error(e) -- str(e) is empty for exceptions with no "
         f"message: {offenders}"
     )
+
+
+# ----- the cause chain is where the real reason lives -----
+
+def test_cause_chain_is_followed():
+    """The Illumio SDK does `raise IllumioApiException(message) from e`, and when
+    it cannot build a message the real HTTP error is left in __cause__. Showing
+    only the outer exception produced
+
+        Failed to create ringfence: IllumioApiException (no detail provided)
+
+    which says a call failed but not why. Observed for real on a 502."""
+    from requests.exceptions import HTTPError
+    try:
+        try:
+            raise HTTPError("502 Server Error: Bad Gateway")
+        except HTTPError as inner:
+            raise IllumioApiException() from inner
+    except IllumioApiException as outer:
+        out = describe_error(outer)
+    assert "IllumioApiException" in out
+    assert "502" in out, "the cause that actually explains the failure is missing"
+
+
+def test_implicit_context_is_followed_too():
+    """A bare `raise X` inside an except block sets __context__, not __cause__."""
+    try:
+        try:
+            raise KeyError("missing-key")
+        except KeyError:
+            raise IllumioApiException()
+    except IllumioApiException as e:
+        assert "missing-key" in describe_error(e)
+
+
+def test_chain_depth_is_bounded():
+    exc = ValueError("root")
+    for i in range(12):
+        try:
+            raise RuntimeError(f"layer-{i}") from exc
+        except RuntimeError as e:
+            exc = e
+    out = describe_error(exc)
+    assert out.count(" <- ") <= 3, "an unbounded chain would flood the message"
+
+
+def test_duplicate_causes_are_not_repeated():
+    try:
+        try:
+            raise ValueError("same text")
+        except ValueError as inner:
+            raise ValueError("same text") from inner
+    except ValueError as e:
+        assert describe_error(e).count("same text") == 1
+
+
+def test_self_referential_chain_does_not_hang():
+    e = RuntimeError("loop")
+    e.__cause__ = e
+    assert describe_error(e)

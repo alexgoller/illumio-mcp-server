@@ -9,6 +9,7 @@ Protocol-surface tests that need no PCE live in `test_mcp_protocol.py`.
 Run with: .venv/bin/python3 -m pytest tests/ -v
 """
 import json
+import os
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
@@ -1053,9 +1054,42 @@ class TestRingfence:
                 f"skip_allowed should reduce remote apps (full={full_count}, skip={skip_count}, already_allowed={already})"
             assert "skipped_already_allowed" in data_skip
 
+
+    async def _reset_ringfence_ruleset(self, name):
+        """Delete a leftover ringfence ruleset so this test starts clean.
+
+        Both create-ringfence tests target pos/Staging and therefore produce the
+        same `RF-pos-Staging`, and both deliberately leave it behind "so it can
+        be manually inspected". create-ringfence MERGES into an existing
+        ruleset, which is correct behaviour -- but these tests assert exact rule
+        counts, so whichever ran second was asserting against the other's
+        output, and every run started from whatever the previous run left.
+
+        That produced a failure in a DIFFERENT ringfence test on each full-suite
+        run, which looked like PCE flakiness and was really accumulated state.
+        Found with 10 allow rules and 1 deny rule still present from earlier
+        runs.
+
+        Cleaning up at the START is not enough. Creating a ringfence changes the
+        PCE's computed `policy_decision` for the traffic it covers, and the
+        DRY-RUN tests assert on exactly that -- `skip_allowed` skips apps the
+        policy already allows. So a leftover ruleset silently changes what a
+        later dry-run test observes, which is how
+        test_ringfence_dry_run_skip_allowed began failing only on a second
+        consecutive run.
+
+        Hence cleanup at both ends. Set ILLUMIO_KEEP_TEST_RULESETS=1 to keep the
+        ruleset for manual inspection, which is what the original "does NOT
+        delete" comment was for -- deterministic by default, inspectable on
+        demand.
+        """
+        result = await run_tool("delete-ruleset", {"name": name})
+        parse_result(result)   # absent is fine; nothing to assert
+
     async def test_ringfence_create_standard_pos_staging(self):
         """Create a standard (non-selective) ringfence for app=pos, env=Staging.
         Does NOT delete the ruleset so it can be manually inspected."""
+        await self._reset_ringfence_ruleset("RF-pos-Staging")
         result = await run_tool("create-ringfence", {
             "app_name": "pos",
             "env_name": "Staging",
@@ -1085,10 +1119,14 @@ class TestRingfence:
         for r in extra:
             assert "allow" in r["type"].lower(), f"Extra-scope rule should be allow, got: {r['type']}"
 
+        if not os.getenv("ILLUMIO_KEEP_TEST_RULESETS"):
+            await self._reset_ringfence_ruleset("RF-pos-Staging")
+
     async def test_ringfence_create_selective_pos_staging(self):
         """Create a selective ringfence for app=pos, env=Staging with default deny_consumer='any'.
         Merges into the standard ruleset created above, adding a deny rule.
         Does NOT delete so it can be manually inspected."""
+        await self._reset_ringfence_ruleset("RF-pos-Staging")
         result = await run_tool("create-ringfence", {
             "app_name": "pos",
             "env_name": "Staging",
@@ -1114,6 +1152,9 @@ class TestRingfence:
             assert "deny all inbound" in deny_rules[0].get("description", "").lower()
             assert deny_rules[0].get("deny_consumer_mode") == "any"
             assert "0.0.0.0" in deny_rules[0].get("consumers", "")
+
+        if not os.getenv("ILLUMIO_KEEP_TEST_RULESETS"):
+            await self._reset_ringfence_ruleset("RF-pos-Staging")
 
     async def test_ringfence_merge_idempotent(self):
         """Running ringfence again on same app should merge without duplicates."""
