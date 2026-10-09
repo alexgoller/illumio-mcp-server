@@ -22,6 +22,59 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.1] — 2026-10-09
+
+Four defects reported by a Claude session driving the server against a live
+PCE. All four reproduce without one; each has a regression test.
+
+### Fixed
+
+- **Unlabelled destinations no longer render as `nan (nan)` in the identity
+  graph.** `raw_flows_to_dataframe` leaves `dst_app`/`dst_env` as a float NaN
+  for an unmanaged destination, NaN is truthy and != the `-` sentinel, so the
+  formatter printed it -- and every external or unmanaged address collapsed
+  into one bucket. For one user that bucket was the fourth-largest destination:
+  538,992 connections on 22, 3389, 443 and 445. Each address is now its own
+  destination, named by FQDN, hostname or IP with the IP-list name in
+  parentheses (`203.0.113.5 (internet)`) -- ranking the list name first only
+  moved the whole bucket from `nan (nan)` to `internet`.
+
+- **`active_days` counts every day a flow covers, not the day it began.**
+  Explorer aggregates a persistent connection into one row spanning
+  `first_detected..last_detected`, so a daemon live for 26 days was one row and
+  counted as one active day: nagios, 11M connections, 14 Sep to 9 Oct, "active
+  on only 1 of 26 days". The intermittent finding fired for syslog, ntp,
+  krb5kdc, openldap and modbus for the same reason. `window_days` is now
+  calendar days too, so the two are comparable.
+
+- **`discover-process-egress` rollups cover everything found, not just the
+  findings returned.** `processes`, `providers` and `distinct_processes` were
+  computed inside the `limit` loop. With `limit: 40` it reported 11 processes
+  and `anthropic: [Claude.exe]` while a filtered query showed the Mac Claude
+  process hitting the same seven Anthropic IPs, just below the cut. `limit`
+  now trims only `findings`.
+
+- **Window dates are validated.** The PCE does not reject a malformed
+  timestamp: `start_date: "not-a-date"` went out as `not-a-dateT00:00:00Z` and
+  came back with 3,723 rows and no error, so a typo silently became a different
+  query. Both dates must now be `YYYY-MM-DD`, an ISO-8601 timestamp, or an
+  epoch number, and a window whose start is after its end is refused with
+  "swap them" instead of being reported as "no flows in window".
+
+### Unlearn
+
+- **`active_days` is no longer a count of rows with distinct start dates.** A
+  low `activity_density` on a long-lived service account before 0.9.1 was an
+  artefact; re-run the graph before acting on an "intermittent" finding.
+- **`discover-process-egress` `distinct_processes` and `providers` before
+  0.9.1 were lower bounds capped by `limit`.** They are now complete for the
+  flows examined; only `flows_truncated` still bounds them.
+- **A reversed window now errors instead of returning empty.** A session that
+  learned to read "no flows in window" as "quiet estate" should treat it as
+  such again -- the swapped-dates case is no longer hidden in it.
+
+---
+
 ## [0.9.0] — 2026-10-01
 
 ### Added

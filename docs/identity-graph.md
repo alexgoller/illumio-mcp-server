@@ -69,7 +69,10 @@ disagree with the call.
 
 **`activity_density`** is the ratio that carries the signal: 15 active days in a
 17-day window is steady use; 2 in 30 is intermittent, and worth a different
-question.
+question. A day is active if any flow attributed to the identity was live on
+it -- Explorer aggregates a persistent connection into one row spanning
+`first_detected..last_detected`, so a daemon connected for 26 days counts 26
+days, not the one it started on.
 
 The process list often tells the story on its own — `chrome.exe` and `mstsc.exe`
 alongside `Google Chrome` and `Microsoft Remote Desktop` is one person working

@@ -3,7 +3,7 @@ import json
 import logging
 import pathlib
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import mcp.types as types
@@ -74,15 +74,15 @@ def _build_split_response(df, total_pce_flows, total_grouped_rows):
 
 def to_query_start(value) -> str:
     """Normalise a window start to full ISO-8601 with an explicit UTC zone."""
-    return _iso(value, "T00:00:00Z")
+    return _iso(value, "T00:00:00Z", "start_date")
 
 
 def to_query_end(value) -> str:
     """Normalise a window end, defaulting to the end of the given day."""
-    return _iso(value, "T23:59:59Z")
+    return _iso(value, "T23:59:59Z", "end_date")
 
 
-def _iso(value, suffix: str) -> str:
+def _iso(value, suffix: str, label: str) -> str:
     """Expand a bare YYYY-MM-DD into a full timestamp.
 
     Not cosmetic. Some PCEs accept a date-only string and return an empty flow
@@ -96,13 +96,52 @@ def _iso(value, suffix: str) -> str:
     Every tool that built its own window with strftime('%Y-%m-%d') therefore
     read empty against the stricter PCE while get-traffic-flows-summary worked,
     because callers passed explicit timestamps to that one by hand.
+
+    This is also the only validation the window gets, and the PCE does none:
+    "not-a-dateT00:00:00Z" came back with 3,723 rows and no error, so a typo
+    silently became a different query. Accepted: YYYY-MM-DD, an ISO-8601
+    timestamp, or an epoch number (the SDK converts those).
     """
     if value is None:
         return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
     text = str(value).strip()
+    if text.isdigit():
+        return text
     if len(text) == 10 and text.count("-") == 2:
+        try:
+            date.fromisoformat(text)
+        except ValueError:
+            raise ValueError(_not_a_date(label, value)) from None
         return text + suffix
+    try:
+        datetime.fromisoformat(text)
+    except ValueError:
+        raise ValueError(_not_a_date(label, value)) from None
     return text
+
+
+def _not_a_date(label: str, value) -> str:
+    return (f"{label} {value!r} is not a date: use YYYY-MM-DD "
+            f"(e.g. 2026-09-14) or an ISO-8601 timestamp")
+
+
+def check_window(start, end) -> None:
+    """Reject a window that runs backwards.
+
+    The PCE answers one with an empty result, which every tool then reported
+    as "no flows in window" -- indistinguishable from a quiet estate.
+    """
+    try:
+        s, e = datetime.fromisoformat(str(start)), datetime.fromisoformat(str(end))
+    except (TypeError, ValueError):
+        return      # epoch or something else the SDK will normalise; not ours to judge
+    s = s if s.tzinfo else s.replace(tzinfo=timezone.utc)
+    e = e if e.tzinfo else e.replace(tzinfo=timezone.utc)
+    if s > e:
+        raise ValueError(f"start_date {start} is after end_date {end}: "
+                         f"the window runs backwards, swap them")
 
 
 
@@ -411,6 +450,7 @@ def fetch_flows_raw(pce, traffic_query, query_name: str, meta: dict | None = Non
     typing and are unrecoverable afterwards. Process and FQDN detail is the
     whole point of this tool, so we keep the raw payload.
     """
+    check_window(traffic_query.start_date, traffic_query.end_date)
     traffic_query.query_name = query_name
     response = pce.post(
         '/traffic_flows/async_queries',
@@ -1584,10 +1624,19 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
 
         limit = int(arguments.get('limit', 50))
         findings, by_process, providers_seen = [], {}, {}
-        for row in grouped.head(limit).to_dict('records'):
+        # The rollups cover everything found; `limit` trims only the findings
+        # list. Computed inside the trimmed loop they reported 11 processes and
+        # one Anthropic client while a filtered query showed a second client
+        # on the same seven IPs, just below the cut.
+        for index, row in enumerate(grouped.to_dict('records')):
             target = _endpoint_label(row, 'dst')
-            allowed = row.get('policy_decision') == 'allowed'
             provider, confidence = classify_destination(row.get('dst_ip'))
+            by_process.setdefault(row.get('process_name'), set()).add(target)
+            if provider:
+                providers_seen.setdefault(provider, set()).add(row.get('process_name'))
+            if index >= limit:
+                continue
+            allowed = row.get('policy_decision') == 'allowed'
             finding = {
                 "process": row.get('process_name'),
                 "destination": target,
@@ -1607,9 +1656,6 @@ def handle_discover_process_egress(ctx, arguments: dict) -> list:
             if row.get('matched_rules') not in (None, NA, ''):
                 finding["matched_rule"] = row['matched_rules']
             findings.append(finding)
-            by_process.setdefault(finding["process"], set()).add(target)
-            if provider:
-                providers_seen.setdefault(provider, set()).add(finding["process"])
 
         return [types.TextContent(type="text", text=json.dumps({
             "window": {"start": arguments['start_date'], "end": arguments['end_date']},
