@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 51 tools, grouped by area. Generated from the server's own registry by
+All 52 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -76,7 +76,7 @@ Builds an app-to-app communication graph and com... |
 | `delete-deny-rule` | operator | **write** | Delete a deny rule from a ruleset by its href |
 | `delete-ruleset` | operator | **write** | Delete a ruleset from the PCE by its href |
 | `delete-sec-rule` | operator | **write** | Delete a single allow rule from a ruleset, leaving the rest of the ruleset intact. For deny rules use delete-deny-rule. |
-| `get-rulesets` | reader | *read* | Get rulesets from the PCE with optional filtering |
+| `get-rulesets` | reader | *read* | Get rulesets and their rules, from draft or active policy, rendered as data: scopes as [{key, value, href}], consumers/provider... |
 | `update-deny-rule` | operator | **write** | Update an existing deny rule in a ruleset. Identify the rule by its href. |
 | `update-ruleset` | operator | **write** | Update an existing ruleset in the PCE. Provide either 'href' or 'name' (but not both) to identify the ruleset. |
 | `update-sec-rule` | operator | **write** | Update an allow rule inside a ruleset, identified by its href. Only the fields you supply change. Use this to refine a rule in... |
@@ -88,6 +88,7 @@ Builds an app-to-app communication graph and com... |
 | `find-unmanaged-traffic` | reader | *read* | Find traffic involving unmanaged (unlabeled) workloads or IP addresses. These are sources or destinations without app/env label... |
 | `get-traffic-flows` | reader | *read* | Get traffic flows from the PCE with comprehensive filtering options |
 | `get-traffic-flows-summary` | reader | *read* | Summarize traffic flows as structured JSON. Sections: by_process (which binary talks to which destination, on which port, under... |
+| `get-traffic-timeline` | reader | *read* | Time-bucketed flow counts from ONE Explorer query: how many flows and connections fell into each 15m/1h/6h/1d bucket of the win... |
 
 ## Ringfencing and threat analysis
 

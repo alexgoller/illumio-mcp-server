@@ -22,6 +22,56 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.10.0] — 2026-10-13
+
+What the `illumio-app-profile` skill (illumio-mcp-skills#1) needs to answer
+"tell me everything about app X" in a handful of calls. Issues #43, #44, #45.
+
+### Added
+
+- **`get-traffic-timeline`** (#43) -- time-bucketed flow counts from ONE
+  Explorer query. `bucket` is `15m` | `1h` | `6h` | `1d`, every bucket is
+  present (zeros included), `split_by` adds a per-bucket breakdown by
+  `policy_decision` or `direction`, and `spikes: true` applies the rule the
+  skill and illumio-tui share: a bucket >= 3x the median of the non-zero
+  buckets, with `worst` named by its multiple. The skill was issuing one
+  summary query per bucket -- 24 for a day at 1h -- and asking permission first.
+
+  Measured live, and disclosed: Explorer aggregates older flows per day, so a
+  1h timeline of last week is mostly rows whose `first_detected` is the day's
+  start -- 54 of 69 blocked rows in the 00:00 bucket, a "27x spike" that was
+  the aggregation. The response reports `rows_spanning_buckets`, the data's
+  `effective_bucket` from the median row span, and caveats `spikes` when the
+  requested bucket is finer than that.
+
+- **`get-workloads` compact carries VEN health** (#44): `ven_status`,
+  `last_heartbeat_on`, `agent_version`, `policy_sync_state`, `health_errors`,
+  `health_error_types`. The list call populates `agent.status` (verified
+  live), so "stale VEN?" no longer needs `detail_level: full`.
+
+- **`get-rulesets`** (#45): `pversion: draft | active`, echoed as
+  `policy_version`; `labels` accepts `key=value` and HREFs like
+  `get-workloads` (a pre-encoded JSON string still passes through);
+  `actor_labels` + `actor_side` return only the rules that NAME those labels
+  as consumer or provider, in any ruleset; and scopes, actors and services
+  are rendered as data -- `{key, value, href}`, `{all_workloads: true}`,
+  `{ip_list: {name, href}}`, `{port, proto: "tcp"}`, `{service: {name,
+  href}}` -- instead of `Actor(actors=None, label=Reference(href=...))`.
+  Allow, deny and override-deny rules share one shape.
+
+### Unlearn
+
+- **`get-rulesets` output changed shape.** `scopes`, `consumers`, `providers`
+  and `ingress_services` are structured objects, not dataclass strings; rules
+  carry `href`; `policy_version` is always present. A session that regexed
+  hrefs out of `Reference(href=...)` can stop.
+- **`get-rulesets` `labels` is a list now**, like every other label filter. The
+  old JSON-string form still works but is no longer the documented one.
+- **A timeline spike at a bucket start is not a spike until `effective_bucket`
+  agrees.** Read `resolution_note` before quoting a multiple.
+
+---
+
 ## [0.9.2] — 2026-10-09
 
 Follow-up to 0.9.1 from the same live session. Splitting the `nan (nan)`

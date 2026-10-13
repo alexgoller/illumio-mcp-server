@@ -216,3 +216,28 @@ They were computed from a fraction of the window. A connection count that
   which still resolve to the raw label columns.
 - The `by_process`, `external_destinations` and `blocked` section shapes.
 - Every write tool.
+
+---
+
+## Timelines: flows per bucket from one query
+
+```
+get-traffic-timeline  { "lookback_days": 1, "bucket": "1h",
+                        "policy_decisions": ["blocked"],
+                        "include_destinations": ["app=shop", "env=prod"],
+                        "spikes": true }
+```
+
+One Explorer query, bucketed client-side by `first_detected`. Every bucket in
+the window is present, zeros included, aligned to the wall clock (`1h` on the
+hour, `1d` at midnight UTC). `split_by: "policy_decision"` or `"direction"`
+adds a per-bucket breakdown. `spikes: true` applies the rule shared with
+illumio-tui -- a bucket at or above **3x the median of the non-zero buckets** --
+and names the `worst` with its multiple.
+
+**Read `effective_bucket` before quoting a spike.** Explorer aggregates older
+flows per day, so a 1h timeline of last week is mostly day-wide rows whose
+`first_detected` is 00:00. On one live estate that put 54 of 69 blocked rows in
+the midnight bucket: a "27x spike" that was the aggregation. The response
+reports `rows_spanning_buckets`, derives `effective_bucket` from the median row
+span, and caveats `spikes` when the requested bucket is finer than the data.

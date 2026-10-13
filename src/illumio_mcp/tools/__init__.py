@@ -47,7 +47,7 @@ from .deny_rules import (
 )
 from .traffic import (
     handle_get_traffic_flows,
-    handle_get_traffic_flows_summary,
+    handle_get_traffic_flows_summary, handle_get_traffic_timeline,
     handle_find_unmanaged_traffic,
     handle_discover_process_egress,
 )
@@ -125,6 +125,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     # Traffic
     "get-traffic-flows":          ToolSpec(handle_get_traffic_flows,        roles=ALL_ROLES),
     "get-traffic-flows-summary":  ToolSpec(handle_get_traffic_flows_summary,roles=ALL_ROLES),
+    "get-traffic-timeline":       ToolSpec(handle_get_traffic_timeline,     roles=ALL_ROLES),
     "build-identity-graph":       ToolSpec(handle_build_identity_graph,     roles=ALL_ROLES),
     "discover-process-egress":    ToolSpec(handle_discover_process_egress,    roles=ALL_ROLES),
     "find-unmanaged-traffic":     ToolSpec(handle_find_unmanaged_traffic,   roles=ALL_ROLES, unscopable=True),
