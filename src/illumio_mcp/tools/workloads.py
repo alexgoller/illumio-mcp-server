@@ -79,8 +79,36 @@ def _truncate_records(records, metadata, max_bytes=MCP_MAX_RESPONSE_BYTES):
     return _serialize(best, True)
 
 
+def _field(obj, name):
+    """Attribute or key, whichever the SDK gave us; None when absent."""
+    if obj is None:
+        return None
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def _ven_fields(w) -> dict:
+    """VEN status, health and heartbeat, from agent.status with ven as fallback.
+
+    The /workloads list call does populate agent.status (verified live), so
+    "is this VEN stale?" no longer needs detail_level=full -- which returned
+    the whole SDK object, interfaces and all, to read three fields.
+    """
+    status = _field(_field(w, "agent"), "status")
+    ven = _field(w, "ven")
+    health = list(_field(status, "agent_health") or [])
+    kinds = [str(_field(h, "type") or h) for h in health]
+    return {
+        "ven_status": _field(status, "status") or _field(ven, "status"),
+        "last_heartbeat_on": _field(status, "last_heartbeat_on"),
+        "agent_version": _field(status, "agent_version") or _field(ven, "version"),
+        "policy_sync_state": _field(status, "security_policy_sync_state"),
+        "health_errors": len(health),
+        "health_error_types": ", ".join(k for k in kinds if k) or None,
+    }
+
+
 def _format_compact(workloads, label_map):
-    """Compact split-format: key fields + dynamic label columns."""
+    """Compact split-format: key fields, VEN health, dynamic label columns."""
     rows = []
     for w in workloads:
         row = {
@@ -96,6 +124,7 @@ def _format_compact(workloads, label_map):
             "managed": bool(w.agent or w.ven),
             "enforcement_mode": w.enforcement_mode,
             "visibility_level": w.visibility_level,
+            **_ven_fields(w),
         }
         if w.labels:
             for l in w.labels:

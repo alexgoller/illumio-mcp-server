@@ -2240,7 +2240,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     "detail_level": {
                         "type": "string",
                         "enum": ["compact", "full", "labels_only"],
-                        "description": "Level of detail. 'compact' (default): tabular summary with key fields and labels. 'full': complete workload data including services, VEN agent, interfaces. 'labels_only': minimal table of href, name, hostname, and labels.",
+                        "description": "Level of detail. 'compact' (default): tabular summary with key fields, labels, and VEN health (ven_status, last_heartbeat_on, agent_version, policy_sync_state, health_errors) -- enough for 'stale VEN' questions without 'full'. 'full': complete workload data including services, VEN agent, interfaces. 'labels_only': minimal table of href, name, hostname, and labels.",
                         "default": "compact"
                     },
                 },
@@ -2554,6 +2554,40 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="get-traffic-timeline",
+            description=(
+                "Time-bucketed flow counts from ONE Explorer query: how many flows and connections "
+                "fell into each 15m/1h/6h/1d bucket of the window, with every bucket present (zeros "
+                "included). Use it for 'blocked flows per hour for app X' instead of one summary query "
+                "per bucket. Rows are bucketed by first_detected; Explorer aggregates a persistent "
+                "connection (and, for older data, several days) into one row, so rows_spanning_buckets "
+                "and resolution_note say how much the start of the window is smeared. spikes=true "
+                "applies the shared rule: a bucket >= 3x the median of the non-zero buckets is a spike, "
+                "and `worst` names the largest with its multiple."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to lookback_days ago"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to today"},
+                    "lookback_days": {"type": "integer", "description": "Used when start_date is omitted (default 1)"},
+                    "bucket": {"type": "string", "enum": ["15m", "1h", "6h", "1d"], "description": "Bucket size (default 1h). Buckets align to the wall clock, not the window start. Max 2000 buckets."},
+                    "split_by": {"type": "string", "enum": ["policy_decision", "direction"], "description": "Add a per-bucket breakdown: by_policy_decision or by_flow_direction"},
+                    "spikes": {"type": "boolean", "description": "Add `spikes`: median of non-zero buckets, threshold (3x), the buckets above it and the worst one"},
+                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to include: label HREFs or key=value (entries are ANDed), IP list/workload HREFs, FQDNs, IPs"},
+                    "exclude_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to exclude"},
+                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to include, same forms as include_sources"},
+                    "exclude_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to exclude"},
+                    "include_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}},
+                    "exclude_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}},
+                    "policy_decisions": {"type": "array", "items": {"type": "string", "enum": ["allowed", "potentially_blocked", "blocked", "unknown"]}, "description": "e.g. ['blocked'] for a blocked-flow timeline"},
+                    "exclude_workloads_from_ip_list_query": {"type": "boolean"},
+                    "max_results": {"type": "integer", "description": "Query cap (default 200000); counts are lower bounds when hit"},
+                    "query_name": {"type": "string"},
+                },
+            },
+        ),
+        types.Tool(
             name="check-pce-connection",
             description="Are my credentials and the connection to the PCE working?",
             inputSchema={
@@ -2563,14 +2597,31 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get-rulesets",
-            description="Get rulesets from the PCE with optional filtering",
+            description=(
+                "Get rulesets and their rules, from draft or active policy, rendered as data: scopes as "
+                "[{key, value, href}], consumers/providers as {label: {key, value, href}} | {all_workloads: true} "
+                "| {ip_list: {name, href}} | {label_group: {name, href}}, ingress_services as {port, proto} or "
+                "{service: {name, href}}. Allow, deny and override_deny rules share one shape (rule_type). "
+                "`labels` matches ruleset SCOPE; `actor_labels` returns only the rules that NAME those labels "
+                "as consumer or provider, in any ruleset -- 'the policy that touches app X'. Each ruleset costs "
+                "one extra request for its deny rules, so filter where you can."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Filter rulesets by name (supports partial matches)"},
                     "description": {"type": "string", "description": "Filter rulesets by description (supports partial matches)"},
                     "enabled": {"type": "boolean", "description": "Filter by enabled/disabled status"},
-                    "labels": {"type": "string", "description": "JSON-encoded list of label URIs to filter by scope"},
+                    "labels": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Scope filter: key=value or label HREFs, ANDed (['app=shop', 'env=prod'] = rulesets scoped to exactly that app). A pre-encoded JSON string is still accepted."
+                    },
+                    "pversion": {"type": "string", "enum": ["draft", "active"], "description": "Policy version to read (default draft). Echoed as policy_version."},
+                    "actor_labels": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Return only rules whose consumers or providers reference ALL of these labels (key=value or HREF). Rulesets with no matching rule are omitted."
+                    },
+                    "actor_side": {"type": "string", "enum": ["consumer", "provider", "any"], "description": "Which side actor_labels must appear on (default any)"},
                     "max_results": {"type": "integer", "description": "Maximum number of rulesets to return"},
                 }
             }

@@ -4,6 +4,7 @@ import mcp.types as types
 from illumio import RuleSet, LabelSet, Rule, AMS, ServicePort
 from ..log_scrub import ScrubbedArgs
 from ..errors import describe_error
+from ..label_refs import resolve_label_refs, encode_label_filter
 from ..service_refs import (
     resolve_ingress_services, windows_qualified_services, consumer_os_warning,
     reject_egress_service_in_ingress, ServiceRefError,
@@ -12,13 +13,142 @@ from ..service_refs import (
 logger = logging.getLogger('illumio_mcp')
 
 
+POLICY_VERSIONS = ("draft", "active")
+ACTOR_SIDES = ("consumer", "provider", "any")
+_PROTO_NAMES = {1: "icmp", 6: "tcp", 17: "udp", 58: "icmpv6"}
+
+
+class _PolicyNames:
+    """href -> name lookups for the objects rules reference, fetched lazily and
+    once. A ruleset listing names labels on every rule, IP lists on some and
+    label groups on few, so each kind is fetched only when first seen."""
+
+    def __init__(self, pce, policy_version: str):
+        self.pce, self.pversion = pce, policy_version
+        self._cache: dict[str, dict] = {}
+
+    def label(self, href: str) -> dict:
+        if "label" not in self._cache:
+            self._cache["label"] = {
+                l.href: {"key": l.key, "value": l.value}
+                for l in self.pce.labels.get(params={"max_results": 10000})}
+        info = self._cache["label"].get(href) or {}
+        return {"key": info.get("key"), "value": info.get("value"), "href": href}
+
+    def name(self, kind: str, href: str) -> dict:
+        if kind not in self._cache:
+            api = {"ip_list": "ip_lists", "label_group": "label_groups",
+                   "service": "services"}.get(kind)
+            objs = []
+            if api is not None:
+                try:
+                    objs = getattr(self.pce, api).get(
+                        policy_version=self.pversion, params={"max_results": 10000})
+                except Exception as exc:                     # names are a nicety
+                    logger.debug("could not list %s for names: %s", api, exc)
+            self._cache[kind] = {o.href: getattr(o, "name", None) for o in objs}
+        return {"name": self._cache[kind].get(href), "href": href}
+
+
+def _ref_href(ref) -> str | None:
+    if isinstance(ref, dict):
+        return ref.get("href")
+    return getattr(ref, "href", None) or (str(ref) if ref else None)
+
+
+def _render_actor(actor, names: _PolicyNames) -> dict:
+    """One consumer/provider/scope entry as plain data.
+
+    The PCE's shape is {"label": {"href"}} | {"ip_list": {"href"}} |
+    {"actors": "ams"} | ... -- the href is the identity, the name is what a
+    reader needs, so both are returned.
+    """
+    if not isinstance(actor, dict):
+        actor = actor.to_json() if hasattr(actor, "to_json") else {"raw": str(actor)}
+    if actor.get("actors") == "ams":
+        return {"all_workloads": True}
+    for kind in ("label", "label_group", "ip_list", "workload",
+                 "virtual_service", "virtual_server"):
+        if actor.get(kind):
+            href = _ref_href(actor[kind])
+            if kind == "label":
+                return {"label": names.label(href)}
+            if kind in ("ip_list", "label_group"):
+                return {kind: names.name(kind, href)}
+            return {kind: {"href": href}}
+    return {"raw": actor}
+
+
+def _render_scope_entry(entry, names: _PolicyNames) -> dict:
+    """A scope is a list of labels; show each as {key, value, href}."""
+    rendered = _render_actor(entry, names)
+    if "label" in rendered:
+        return rendered["label"]
+    if "label_group" in rendered:
+        return {"label_group": rendered["label_group"]}
+    return rendered
+
+
+def _render_service(svc, names: _PolicyNames) -> dict:
+    if not isinstance(svc, dict):
+        svc = svc.to_json() if hasattr(svc, "to_json") else {"raw": str(svc)}
+    if svc.get("href"):
+        return {"service": names.name("service", svc["href"])}
+    out: dict = {}
+    if svc.get("port") is not None:
+        out["port"] = svc["port"]
+    if svc.get("to_port") is not None:
+        out["to_port"] = svc["to_port"]
+    proto = svc.get("proto")
+    if proto is not None:
+        out["proto"] = _PROTO_NAMES.get(proto, proto)
+    for key in ("icmp_type", "icmp_code", "process_name", "windows_service_name",
+                "service_name", "user_name"):
+        if svc.get(key) is not None:
+            out[key] = svc[key]
+    return out or {"raw": svc}
+
+
+def _render_rule(rule: dict, rule_type: str, names: _PolicyNames) -> dict:
+    out = {
+        "rule_type": rule_type,
+        "href": rule.get("href"),
+        "enabled": rule.get("enabled"),
+        "description": rule.get("description"),
+        "consumers": [_render_actor(a, names) for a in rule.get("consumers") or []],
+        "providers": [_render_actor(a, names) for a in rule.get("providers") or []],
+        "ingress_services": [_render_service(x, names) for x in rule.get("ingress_services") or []],
+    }
+    if rule_type == "allow":
+        out["resolve_labels_as"] = rule.get("resolve_labels_as")
+        if rule.get("unscoped_consumers"):
+            out["unscoped_consumers"] = True
+    return out
+
+
+def _rule_names_all(rule: dict, hrefs: list[str], side: str) -> bool:
+    """True when ONE side of the rule references every label in hrefs."""
+    sides = ("consumers", "providers") if side == "any" else (side + "s",)
+    for key in sides:
+        present = {(a.get("label") or {}).get("href") for a in rule.get(key) or []
+                   if isinstance(a, dict)}
+        if all(h in present for h in hrefs):
+            return True
+    return False
+
+
 def handle_get_rulesets(ctx, arguments: dict) -> list:
     logger.debug("GET RULESETS CALLED with arguments: %s", ScrubbedArgs(arguments))
     try:
         pce = ctx.pce
 
+        pversion = str(arguments.get('pversion') or 'draft').lower()
+        if pversion not in POLICY_VERSIONS:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": f"pversion must be 'draft' or 'active', got {pversion!r}"}))]
+
         params = {}
-        for param in ['name', 'description', 'labels']:
+        for param in ['name', 'description']:
             if arguments.get(param):
                 params[param] = arguments[param]
         if 'enabled' in arguments and arguments['enabled'] is not None:
@@ -26,61 +156,87 @@ def handle_get_rulesets(ctx, arguments: dict) -> list:
         if arguments.get('max_results'):
             params['max_results'] = arguments['max_results']
 
-        rulesets = pce.rule_sets.get(params=params) if params else pce.rule_sets.get_all()
+        # Scope filter. key=value and HREFs resolve like get-workloads; a
+        # string that already looks like the PCE's JSON encoding passes
+        # through, so callers who built '[["/orgs/1/labels/5"]]' by hand keep
+        # working. Raw pass-through of anything else was the 406 invalid_uri.
+        labels = arguments.get('labels')
+        if labels:
+            if isinstance(labels, str) and labels.lstrip().startswith('['):
+                params['labels'] = labels
+            else:
+                hrefs, unknown = resolve_label_refs(pce, labels)
+                if unknown:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "error": "unresolved_label_filter",
+                        "unresolved": unknown,
+                        "message": "Use key=value with an existing label, or a label HREF.",
+                    }))]
+                params['labels'] = encode_label_filter(hrefs)
 
-        # Convert rulesets to serializable format
-        ruleset_data = []
+        # Actor filter: rules that NAME these labels as consumer or provider,
+        # in any ruleset. The PCE has no server-side form of this, so it is a
+        # client-side pass over the fetched rulesets -- still one call for the
+        # caller instead of a fetch-everything-and-regex-the-hrefs.
+        actor_hrefs, actor_side = None, 'any'
+        if arguments.get('actor_labels'):
+            actor_side = str(arguments.get('actor_side') or 'any').lower()
+            if actor_side not in ACTOR_SIDES:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "error": f"actor_side must be one of {', '.join(ACTOR_SIDES)}"}))]
+            actor_hrefs, unknown = resolve_label_refs(pce, arguments['actor_labels'])
+            if unknown:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "error": "unresolved_actor_labels", "unresolved": unknown,
+                    "message": "Use key=value with an existing label, or a label HREF.",
+                }))]
+
+        if params:
+            rulesets = pce.rule_sets.get(policy_version=pversion, params=params)
+        else:
+            rulesets = pce.rule_sets.get_all(policy_version=pversion)
+
+        names = _PolicyNames(pce, pversion)
+        ruleset_data, rules_matched = [], 0
         for ruleset in rulesets:
-            rules = []
-            for rule in ruleset.rules:
-                rule_dict = {
-                    'rule_type': 'allow',
-                    'enabled': rule.enabled,
-                    'description': rule.description,
-                    'resolve_labels_as': str(rule.resolve_labels_as) if rule.resolve_labels_as else None,
-                    'consumers': [str(consumer) for consumer in rule.consumers] if rule.consumers else [],
-                    'providers': [str(provider) for provider in rule.providers] if rule.providers else [],
-                    'ingress_services': [str(service) for service in rule.ingress_services] if rule.ingress_services else []
-                }
-                rules.append(rule_dict)
+            rs = ruleset.to_json() if hasattr(ruleset, "to_json") else dict(ruleset)
+            rules = [_render_rule(r, 'allow', names) for r in rs.get('rules') or []]
 
-            # Fetch deny rules via raw API (override flag distinguishes override deny rules)
+            # Deny rules live on an undocumented endpoint, one call per ruleset.
             try:
-                resp = pce.get(f"{ruleset.href}/deny_rules")
-                deny_rules = resp.json()
-                if deny_rules:
-                    for dr in deny_rules:
-                        is_override = dr.get('override', False)
-                        rule_dict = {
-                            'rule_type': 'override_deny' if is_override else 'deny',
-                            'href': dr.get('href'),
-                            'enabled': dr.get('enabled'),
-                            'description': dr.get('description'),
-                            'consumers': [str(c) for c in dr.get('consumers', [])],
-                            'providers': [str(p) for p in dr.get('providers', [])],
-                            'ingress_services': [str(s) for s in dr.get('ingress_services', [])]
-                        }
-                        rules.append(rule_dict)
+                for dr in pce.get(f"{rs['href']}/deny_rules").json() or []:
+                    rules.append(_render_rule(
+                        dr, 'override_deny' if dr.get('override') else 'deny', names))
             except Exception as de:
-                logger.debug(f"Could not fetch deny_rules for {ruleset.href}: {de}")
+                logger.debug(f"Could not fetch deny_rules for {rs.get('href')}: {de}")
 
-            ruleset_dict = {
-                'href': ruleset.href,
-                'name': ruleset.name,
-                'enabled': ruleset.enabled,
-                'description': ruleset.description,
-                'scopes': [str(scope) for scope in ruleset.scopes] if ruleset.scopes else [],
-                'rules': rules
-            }
-            ruleset_data.append(ruleset_dict)
+            if actor_hrefs is not None:
+                rules = [r for r in rules if _rule_names_all(r, actor_hrefs, actor_side)]
+                rules_matched += len(rules)
+                if not rules:
+                    continue
 
-        return [types.TextContent(
-            type="text",
-            text=json.dumps({
-                "rulesets": ruleset_data,
-                "total_count": len(ruleset_data)
-            }, indent=2)
-        )]
+            ruleset_data.append({
+                'href': rs.get('href'),
+                'name': rs.get('name'),
+                'enabled': rs.get('enabled'),
+                'description': rs.get('description'),
+                'scopes': [[_render_scope_entry(a, names) for a in scope]
+                           for scope in rs.get('scopes') or []],
+                'rules': rules,
+            })
+
+        payload = {
+            "policy_version": pversion,
+            "rulesets": ruleset_data,
+            "total_count": len(ruleset_data),
+        }
+        if actor_hrefs is not None:
+            payload["actor_filter"] = {
+                "labels": list(arguments['actor_labels']) if not isinstance(arguments['actor_labels'], str)
+                          else [arguments['actor_labels']],
+                "side": actor_side, "rules_matched": rules_matched}
+        return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
 
     except Exception as e:
         error_msg = f"Failed to get rulesets: {describe_error(e)}"

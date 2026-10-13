@@ -1270,6 +1270,214 @@ def _fit_summary_to_budget(df, summary: dict, budget: int, detail_level: str = "
         payload = json.dumps(best, default=str)
     return best, payload
 
+TIMELINE_BUCKETS = {"15m": 900, "1h": 3600, "6h": 21600, "1d": 86400}
+TIMELINE_SPLITS = {"policy_decision": "policy_decision", "direction": "flow_direction"}
+MAX_TIMELINE_BUCKETS = 2000
+SPIKE_MULTIPLE = 3.0
+_EPOCH = pd.Timestamp(0, tz="UTC")
+
+
+def _bucket_series(df, first_bucket: int, step: int, count: int, split_col=None):
+    """Count flows and connections per bucket, every bucket present.
+
+    Rows land in the bucket their first_detected falls in. Explorer aggregates
+    a persistent connection into one row, so a row can span several buckets;
+    those are counted where they began and the caller is told how many did.
+    """
+    series = [{"bucket_start": datetime.fromtimestamp(first_bucket + i * step, tz=timezone.utc)
+               .strftime("%Y-%m-%dT%H:%M:%SZ"), "flows": 0, "connections": 0}
+              for i in range(count)]
+    if split_col:
+        for b in series:
+            b[f"by_{split_col}"] = {}
+    spanning = unbucketed = outside = 0
+    median_span = 0.0
+    if df.empty or "first_detected" not in df.columns:
+        return series, spanning, unbucketed, outside, median_span
+
+    ts = pd.to_datetime(df["first_detected"], errors="coerce", utc=True)
+    te = pd.to_datetime(df.get("last_detected"), errors="coerce", utc=True) \
+        if "last_detected" in df.columns else ts
+    secs = (ts - _EPOCH).dt.total_seconds()
+    idx = ((secs - first_bucket) // step)
+    valid = ts.notna()
+    unbucketed = int((~valid).sum())
+    in_range = valid & (idx >= 0) & (idx < count)
+    outside = int((valid & ~in_range).sum())
+    end_idx = ((te - _EPOCH).dt.total_seconds() - first_bucket) // step
+    spanning = int((in_range & te.notna() & (end_idx > idx)).sum())
+    spans = (te - ts).dt.total_seconds()[in_range & te.notna()]
+    median_span = float(spans.median()) if len(spans) else 0.0
+
+    rows = df.loc[in_range].assign(_bucket=idx[in_range].astype(int))
+    conns = pd.to_numeric(rows.get("num_connections", 0), errors="coerce").fillna(0)
+    rows = rows.assign(_conns=conns)
+    for b, grp in rows.groupby("_bucket"):
+        series[b]["flows"] = int(len(grp))
+        series[b]["connections"] = int(grp["_conns"].sum())
+        if split_col and split_col in grp.columns:
+            counts = grp[split_col].fillna("unknown").astype(str).value_counts()
+            series[b][f"by_{split_col}"] = {k: int(v) for k, v in counts.items()}
+    return series, spanning, unbucketed, outside, median_span
+
+
+def _effective_bucket(median_span_seconds: float) -> str:
+    """The finest bucket the data actually supports.
+
+    Explorer aggregates older flows per day, so a 1h timeline of last week is
+    mostly rows whose first_detected is the day's start: 54 of 69 blocked rows
+    in the 00:00 bucket on a live estate, a "27x spike" that was the
+    aggregation, not the traffic. The median row span says what the real
+    resolution is.
+    """
+    for name, secs in TIMELINE_BUCKETS.items():
+        if secs >= median_span_seconds:
+            return name
+    return "1d"
+
+
+def _spikes(series: list, metric: str = "flows") -> dict:
+    """Buckets at or above SPIKE_MULTIPLE x the median of the NON-ZERO buckets.
+
+    The rule the app-profile skill and illumio-tui share, so both name the same
+    spike for the same app. Non-zero median: a quiet estate with one busy hour
+    should not read as a spike against a median of 0.
+    """
+    import statistics
+    nonzero = [b[metric] for b in series if b[metric] > 0]
+    median = statistics.median(nonzero) if nonzero else 0
+    threshold = SPIKE_MULTIPLE * median
+    hits = []
+    if median:
+        hits = [{"bucket_start": b["bucket_start"], metric: b[metric],
+                 "multiple": round(b[metric] / median, 1)}
+                for b in series if b[metric] >= threshold]
+    worst = max(hits, key=lambda h: h[metric]) if hits else None
+    return {"metric": metric, "rule": f">= {SPIKE_MULTIPLE:g}x the median of non-zero buckets",
+            "median_nonzero": median, "threshold": threshold, "buckets": hits, "worst": worst}
+
+
+def handle_get_traffic_timeline(ctx, arguments: dict) -> list:
+    """Time-bucketed flow counts from ONE Explorer query.
+
+    The app-profile skill needs blocked flows per hour to flag spikes. Without
+    this it issued one summary query per bucket -- 24 for a day at 1h, 28 for
+    a week at 6h, twice for both directions -- and had to ask permission first.
+    """
+    logger.debug("GET TRAFFIC TIMELINE CALLED: %s", ScrubbedArgs(arguments))
+    arguments = dict(arguments or {})
+    try:
+        bucket = str(arguments.get('bucket') or '1h')
+        if bucket not in TIMELINE_BUCKETS:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": f"bucket must be one of {', '.join(TIMELINE_BUCKETS)}, got {bucket!r}"}))]
+        split_by = arguments.get('split_by') or None
+        if split_by and split_by not in TIMELINE_SPLITS:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": f"split_by must be one of {', '.join(TIMELINE_SPLITS)}, got {split_by!r}"}))]
+
+        lookback = int(arguments.get('lookback_days', 1))
+        start = to_query_start(arguments.get('start_date') or
+                               (datetime.now() - timedelta(days=lookback)).strftime('%Y-%m-%d'))
+        end = to_query_end(arguments.get('end_date') or datetime.now().strftime('%Y-%m-%d'))
+        check_window(start, end)
+
+        step = TIMELINE_BUCKETS[bucket]
+        s_dt, e_dt = datetime.fromisoformat(start), datetime.fromisoformat(end)
+        s_dt = s_dt if s_dt.tzinfo else s_dt.replace(tzinfo=timezone.utc)
+        e_dt = e_dt if e_dt.tzinfo else e_dt.replace(tzinfo=timezone.utc)
+        # Wall-clock aligned: 1h buckets start on the hour, 1d at midnight UTC,
+        # whatever the window start was. Matches how a person reads "14:00-15:00".
+        first_bucket = int(s_dt.timestamp()) // step * step
+        last_bucket = int(e_dt.timestamp()) // step * step
+        count = (last_bucket - first_bucket) // step + 1
+        if count > MAX_TIMELINE_BUCKETS:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": (f"{start} to {end} at {bucket} is {count} buckets "
+                          f"(max {MAX_TIMELINE_BUCKETS}); choose a coarser bucket "
+                          f"or a narrower window")}))]
+
+        pce = ctx.pce
+        unresolved = _resolve_label_filters(pce, arguments)
+        problem = _unresolved_error(unresolved, pce)
+        if problem:
+            return [types.TextContent(type="text", text=json.dumps(problem))]
+
+        max_results = min(int(arguments.get('max_results', MCP_QUERY_MAX_RESULTS)),
+                          MCP_QUERY_MAX_RESULTS)
+        name = arguments.get('query_name', 'mcp-traffic-timeline')
+        query = TrafficQuery.build(
+            start_date=start, end_date=end,
+            include_sources=_normalise_filter(arguments.get('include_sources')),
+            exclude_sources=arguments.get('exclude_sources', []),
+            include_destinations=_normalise_filter(arguments.get('include_destinations')),
+            exclude_destinations=arguments.get('exclude_destinations', []),
+            include_services=arguments.get('include_services', []),
+            exclude_services=arguments.get('exclude_services', []),
+            policy_decisions=arguments.get('policy_decisions', []),
+            exclude_workloads_from_ip_list_query=arguments.get('exclude_workloads_from_ip_list_query', True),
+            max_results=max_results,
+            query_name=name,
+        )
+        raw = fetch_flows_raw(pce, query, name)
+        df = raw_flows_to_dataframe(pce, raw)
+
+        series, spanning, unbucketed, outside, median_span = _bucket_series(
+            df, first_bucket, step, count, TIMELINE_SPLITS.get(split_by))
+        effective = _effective_bucket(median_span)
+        too_fine = TIMELINE_BUCKETS[effective] > step
+        payload = {
+            "window": {"start": start, "end": end},
+            "bucket": bucket,
+            "series": series,
+            "totals": {
+                "flows": sum(b["flows"] for b in series),
+                "connections": sum(b["connections"] for b in series),
+                "pce_flows": len(raw),
+                "flows_truncated": len(raw) >= max_results,
+            },
+            "rows_spanning_buckets": spanning,
+            "effective_bucket": effective,
+        }
+        if spanning:
+            payload["resolution_note"] = (
+                f"{spanning} of {payload['totals']['flows']} row(s) span more than one "
+                f"{bucket} bucket: Explorer aggregates a persistent connection -- and, "
+                f"for older data, a whole day -- into one row, counted in the bucket it "
+                f"began in. Median row span is {median_span / 3600:.1f}h, so the data "
+                f"supports {effective} buckets"
+                + (f"; {bucket} is finer than that and will pile aggregates onto bucket "
+                   f"starts." if too_fine else "."))
+        if unbucketed or outside:
+            payload["rows_not_bucketed"] = {"no_timestamp": unbucketed, "outside_window": outside}
+        if len(raw) >= max_results:
+            payload["coverage_note"] = (
+                f"Hit the {max_results}-flow cap; counts are lower bounds. Narrow "
+                f"the window or add label filters.")
+        if arguments.get('spikes'):
+            payload["spikes"] = _spikes(series)
+            worst = payload["spikes"]["worst"]
+            if too_fine:
+                payload["spikes"]["caveat"] = (
+                    f"Unreliable at {bucket}: most rows are aggregates wider than the "
+                    f"bucket, so their starts read as spikes. Re-run with "
+                    f"bucket={effective}.")
+            elif worst and spanning and worst["bucket_start"] == series[0]["bucket_start"]:
+                # Live, 7 days at 1d: 1719 on the first day, then 590/589/466.
+                # Aggregates that began before the window land in its first
+                # bucket; a spike there is the window edge, not the traffic.
+                payload["spikes"]["caveat"] = (
+                    "The worst bucket is the first of the window, where aggregates "
+                    "that began earlier pile up. Widen the window by one bucket "
+                    "and re-check before calling it a spike.")
+        return [types.TextContent(type="text", text=json.dumps(payload, default=str))]
+
+    except Exception as e:
+        error_msg = f"Failed to build traffic timeline: {describe_error(e)}"
+        logger.error(error_msg, exc_info=True)
+        return [types.TextContent(type="text", text=json.dumps({"error": error_msg}))]
+
+
 def handle_get_traffic_flows_summary(ctx, arguments: dict) -> list:
     logger.debug("=" * 80)
     logger.debug("GET TRAFFIC FLOWS SUMMARY CALLED")
