@@ -165,26 +165,36 @@ def build_http_context_for(
 
     In `per_user` mode (default), looks up the user's PCE creds in the keystore.
     In `shared` mode, every request uses the env-loaded PCE singleton — no
-    keystore lookup, no per-user PCE attribution.
+    keystore lookup, no per-user PCE attribution. In `hybrid` mode the keystore
+    is tried first and the shared account is the fallback -- including when a
+    stored key exists but cannot build a client, which is the case the user
+    will not expect, so `effective_pce_mode` says what actually happened.
     """
+    effective = None
     if pce_mode == "shared":
         # Shared service-account mode: every authenticated user uses the same
         # env-loaded PCE. SSO + role + audit + confirm still enforced.
         pce = _env_pce_or_none("shared mode")
+        effective = "shared" if pce is not None else None
     else:
-        # per_user mode (Phase 3b)
+        # per_user mode (Phase 3b), and the first half of hybrid (Phase 3f)
         pce = None
         if keystore is not None and user_sub and user_iss:
             try:
-                from .pce import build_pce_for
+                from . import pce as pce_module
                 creds = keystore.get(sub=user_sub, iss=user_iss)
                 if creds is not None:
-                    pce = build_pce_for(creds)
+                    pce = pce_module.build_pce_for(creds)
+                    effective = "per_user"
             except Exception:
                 logger.exception("Failed to load PCE credentials for user %s", user_sub)
         elif keystore is None:
             # Dev-insecure mode: no keystore, fall back to env-loaded PCE
             pce = _env_pce_or_none("dev-insecure mode")
+            effective = "shared" if pce is not None else None
+        if pce is None and pce_mode == "hybrid":
+            pce = _env_pce_or_none("hybrid fallback")
+            effective = "shared" if pce is not None else None
     return ToolContext(
         pce=pce,
         is_stdio=False,
@@ -197,6 +207,7 @@ def build_http_context_for(
         confirm_manager=confirm_manager,
         jti_store=jti_store,
         pce_mode=pce_mode,
+        effective_pce_mode=effective,
     )
 
 
@@ -3631,7 +3642,7 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
         ),
         types.Tool(
             name="check-pce-credentials-status",
-            description="Check whether PCE credentials are registered for the current user without revealing the secret values.",
+            description="Check which PCE credentials apply to the current user without revealing secrets. Always carries `mode`: per_user (your own key), shared (the operator's service account -- PCE-side audit shows it, not you), or stdio. In hybrid mode this reflects THIS request: registered users whose key could not be used are told they ran as shared.",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -3694,6 +3705,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
             reason=reason,
             role=ctx.user_role,
             request_id=ctx.request_id,
+            effective_pce_mode=getattr(ctx, "effective_pce_mode", None),
         ))
 
     # Role check

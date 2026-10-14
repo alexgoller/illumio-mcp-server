@@ -43,7 +43,8 @@ from ..auth.audit import NullAuditLog
 from ..auth.confirm import ConfirmTokenManager, MissingConfirmHmacKeyError
 from ..auth.confirm_init import build_confirm_manager_from_env
 from ..auth.confirm_replay import NullJtiStore
-from ..auth.pce_mode import load_pce_mode_from_env, is_shared_mode
+from ..auth.pce_mode import (load_pce_mode_from_env, is_shared_mode, is_hybrid_mode,
+                             uses_keystore, uses_shared_env)
 from ..server import (
     server as mcp_server,
     build_http_context_for,
@@ -147,6 +148,15 @@ def _build_app(
     return Starlette(debug=False, routes=routes, lifespan=lifespan, middleware=middleware)
 
 
+def require_shared_pce_env(pce_mode: str) -> None:
+    """Fail fast when the env the shared service account needs is missing."""
+    for required in ("PCE_HOST", "PCE_PORT", "PCE_ORG_ID", "API_KEY", "API_SECRET"):
+        if not os.getenv(required):
+            raise SystemExit(
+                f"MCP_PCE_MODE={pce_mode} requires {required} env var (same vars stdio uses)."
+            )
+
+
 def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
     # The bind guard used to be inverted. It refused any non-loopback bind
     # unless MCP_DEV_INSECURE=1 -- and MCP_DEV_INSECURE is precisely what turns
@@ -180,16 +190,13 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
         except MissingOAuthConfigError as e:
             raise SystemExit(str(e))
         pce_mode = load_pce_mode_from_env()
-        if is_shared_mode(pce_mode):
-            # Shared-key mode: no keystore, no MCP_KEK required.
-            # Verify the env vars stdio uses are present; fail-fast otherwise.
-            for required in ("PCE_HOST", "PCE_PORT", "PCE_ORG_ID", "API_KEY", "API_SECRET"):
-                if not os.getenv(required):
-                    raise SystemExit(
-                        f"MCP_PCE_MODE=shared requires {required} env var (same vars stdio uses)."
-                    )
-            keystore = None
-        else:
+        # shared and hybrid both fall back to the env-loaded service account,
+        # so both fail fast without its env; per_user and hybrid both read
+        # the keystore, so both need MCP_KEK. Hybrid needs everything.
+        if uses_shared_env(pce_mode):
+            require_shared_pce_env(pce_mode)
+        keystore = None
+        if uses_keystore(pce_mode):
             try:
                 keystore = build_keystore_from_env()
             except MissingKEKError as e:
@@ -207,6 +214,9 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080) -> None:
         extras.append("DEV-INSECURE: no auth, no keystore, admin role, no confirm")
     elif is_shared_mode(pce_mode):
         extras.append("PCE-MODE: shared (single service account)")
+    elif is_hybrid_mode(pce_mode):
+        extras.append("PCE-MODE: hybrid (per-user keys where registered, shared otherwise; "
+                      "PCE-side audit is mixed by design)")
     logger.info(f"Starting HTTP transport on http://{host}:{port}/mcp"
                 + (f"  [{'; '.join(extras)}]" if extras else ""))
     uvicorn.run(app, host=host, port=port, log_level="info")

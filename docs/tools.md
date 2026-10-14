@@ -120,7 +120,7 @@ which other apps communicate with this... |
 | Tool | Access | Type | Description |
 |---|---|---|---|
 | `check-pce-connection` | reader | *read* | Are my credentials and the connection to the PCE working? |
-| `check-pce-credentials-status` | reader | *read* | Check whether PCE credentials are registered for the current user without revealing the secret values. |
+| `check-pce-credentials-status` | reader | *read* | Check which PCE credentials apply to the current user without revealing secrets. Always carries `mode`: per_user (your own key)... |
 | `delete-pce-credentials` | reader | **write** | Remove the current user's stored PCE credentials. Idempotent — safe to call even if no credentials are stored. |
 | `get-events` | reader | *read* | Get events from the PCE with optional filtering |
 | `get-pairing-profiles` | reader | *read* | Get pairing profiles from the PCE. Pairing profiles define the initial enforcement mode and labels for VENs when they pair with... |

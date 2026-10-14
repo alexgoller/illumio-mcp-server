@@ -57,9 +57,15 @@ Required for all authenticated HTTP deployments (i.e., any deployment where `MCP
 
 | Var | Required when | Default | Format | Example |
 |---|---|---|---|---|
-| `MCP_PCE_MODE` | Optional | `per_user` | `per_user` or `shared` | `shared` |
-| `MCP_KEK` | `MCP_PCE_MODE=per_user` and auth mode | — | Base64 of 32 random bytes | (generate — see below) |
+| `MCP_PCE_MODE` | Optional | `per_user` | `per_user`, `shared` or `hybrid` | `hybrid` |
+| `MCP_KEK` | `MCP_PCE_MODE=per_user` or `hybrid`, auth mode | — | Base64 of 32 random bytes | (generate — see below) |
 | `MCP_KEYSTORE_PATH` | Optional | `./data/keys.db` | File path | `/var/lib/illumio-mcp/keys.db` |
+
+`hybrid` tries the keystore first and falls back to the shared service account
+(the `PCE_*` / `API_*` vars above), so it needs both sets of configuration and
+fails fast at startup without either. PCE-side audit is then mixed by design;
+the MCP audit log's `effective_pce_mode` column (`per_user` or `shared`, added
+in place to an existing database) says which credentials each call used.
 
 The `MCP_KEK` (Key-Encryption-Key) encrypts the per-user PCE secrets at rest. It is never stored in the SQLite database. Loss of `MCP_KEK` means all per-user credentials are permanently unrecoverable (intentional, fail-closed). In production, source it from KMS or Vault rather than a shell export.
 
