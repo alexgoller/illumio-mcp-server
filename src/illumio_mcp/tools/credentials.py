@@ -118,12 +118,34 @@ def handle_check_pce_credentials_status(ctx, arguments: dict) -> list:
         }))]
     sub, iss = ident
     creds = ctx.keystore.get(sub=sub, iss=iss)
+    hybrid = getattr(ctx, "pce_mode", "per_user") == "hybrid"
+    effective = getattr(ctx, "effective_pce_mode", None)
     if creds is None:
+        if hybrid:
+            return [types.TextContent(type="text", text=json.dumps({
+                "registered": True,
+                "mode": "shared",
+                "message": ("Using the shared service account; PCE-side audit shows it, not "
+                            "you. Call register-pce-credentials to opt into per-user "
+                            "attribution."),
+            }))]
         return [types.TextContent(type="text", text=json.dumps({"registered": False}))]
-    return [types.TextContent(type="text", text=json.dumps({
+    body = {
         "registered": True,
+        "mode": "per_user",
         "pce_host": creds.host,
         "pce_port": creds.port,
         "pce_org_id": creds.org_id,
         "tls_verify": creds.tls_verify,
-    }))]
+    }
+    if hybrid and effective == "shared":
+        # The confused-deputy case the spec calls out: a row exists but this
+        # very request could not build a client from it and ran as the
+        # service account. Reporting "per_user" here would be a lie about
+        # what the PCE audit log is going to show.
+        body["mode"] = "shared"
+        body["message"] = ("Credentials are registered but could not be used for this "
+                           "request (expired key, unreachable host?), so it ran as the "
+                           "shared service account. Re-register to restore per-user "
+                           "attribution.")
+    return [types.TextContent(type="text", text=json.dumps(body))]

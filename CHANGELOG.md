@@ -22,6 +22,36 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.11.0] — 2026-10-14
+
+### Added
+
+- **`MCP_PCE_MODE=hybrid`** (#17, Phase 3f). Per-user keystore first; users
+  who have not registered -- or whose stored key cannot build a client --
+  fall through to the shared service account. The dispatcher's
+  `no_pce_credentials` gate never fires. `/setup`, `register-pce-credentials`
+  and `delete-pce-credentials` work as in per-user mode, so a team can roll
+  out on the shared key and let individuals opt into named attribution.
+
+  The mode's real risk is the confused deputy -- "I thought that ran as me"
+  -- so it is made visible in two places. The MCP audit log gains an
+  `effective_pce_mode` column (`per_user` | `shared`, added in place to an
+  existing database), and `check-pce-credentials-status` reports the mode
+  that applied to **this request**: `shared` with an opt-in hint when
+  unregistered, `per_user` with the host when registered, and `shared` with
+  a warning when a row exists but could not be used. Startup refuses without
+  both `MCP_KEK` and the `PCE_*` env.
+
+### Unlearn
+
+- **PCE-side audit in hybrid mode is mixed by design.** Some calls show the
+  human, some the service account; neither is a bug. The MCP audit log is the
+  record of which.
+- **`check-pce-credentials-status` now always carries `mode`** (`per_user`,
+  `shared`, `stdio`), in every PCE mode.
+
+---
+
 ## [0.10.0] — 2026-10-13
 
 What the `illumio-app-profile` skill (illumio-mcp-skills#1) needs to answer

@@ -31,6 +31,10 @@ class AuditEntry:
     reason: str | None
     role: str | None
     request_id: str | None
+    # Phase 3f: which PCE credentials the call ran with ('per_user' |
+    # 'shared' | None). In hybrid mode this is the only record of whether
+    # the PCE-side audit shows the human or the service account.
+    effective_pce_mode: str | None = None
 
 
 class AuditLog(Protocol):
@@ -55,7 +59,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     decision     TEXT NOT NULL,
     reason       TEXT,
     role         TEXT,
-    request_id   TEXT
+    request_id   TEXT,
+    effective_pce_mode TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_sub_ts ON audit_log(sub, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_decision ON audit_log(decision, ts DESC);
@@ -75,6 +80,7 @@ class SQLiteAuditLog:
             with sqlite3.connect(self.db_path) as con:
                 con.execute("PRAGMA journal_mode=WAL;")
                 con.executescript(_SCHEMA)
+                self._migrate(con)
         finally:
             os.umask(old_umask)
         try:
@@ -82,12 +88,20 @@ class SQLiteAuditLog:
         except OSError:
             pass
 
+    @staticmethod
+    def _migrate(con: sqlite3.Connection) -> None:
+        """Add columns a pre-existing database lacks. Additive only, so an
+        operator upgrading keeps every row they have."""
+        have = {row[1] for row in con.execute("PRAGMA table_info(audit_log)")}
+        if "effective_pce_mode" not in have:
+            con.execute("ALTER TABLE audit_log ADD COLUMN effective_pce_mode TEXT")
+
     def record(self, entry: AuditEntry) -> None:
         ts = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.db_path) as con:
             con.execute(
-                "INSERT INTO audit_log (ts, sub, iss, tool, decision, reason, role, request_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO audit_log (ts, sub, iss, tool, decision, reason, role, "
+                "request_id, effective_pce_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (ts, entry.sub, entry.iss, entry.tool, entry.decision,
-                 entry.reason, entry.role, entry.request_id),
+                 entry.reason, entry.role, entry.request_id, entry.effective_pce_mode),
             )

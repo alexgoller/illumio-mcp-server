@@ -18,4 +18,8 @@ class ToolContext:
     request_id: str | None = None
     confirm_manager: object | None = None
     jti_store: object | None = None
-    pce_mode: str = "per_user"  # 'per_user' (default) | 'shared'
+    pce_mode: str = "per_user"  # 'per_user' (default) | 'shared' | 'hybrid'
+    # Which credentials THIS request's pce was actually built from:
+    # 'per_user' | 'shared' | None (no PCE). In hybrid mode the two differ
+    # per user and per call; the audit log and the status tool report it.
+    effective_pce_mode: str | None = None

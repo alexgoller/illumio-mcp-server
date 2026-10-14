@@ -1,6 +1,6 @@
-"""PCE mode selector — per-user keystore vs single shared service account.
+"""PCE mode selector — per-user keystore, shared service account, or both.
 
-Two modes:
+Three modes:
   - "per_user" (default, Phase 3b): each authenticated user has their own
     PCE API key in the encrypted SQLite keystore. PCE-side audit logs
     attribute correctly per human.
@@ -8,6 +8,13 @@ Two modes:
     loaded from PCE_* env vars. SSO + JWT auth still required; role-based
     authz still enforced; the server-side audit log records per-human
     identity. PCE-side audit shows the service account.
+  - "hybrid" (Phase 3f): per-user keystore lookup first; users who have not
+    registered -- or whose stored key cannot build a client -- fall through
+    to the shared service account. PCE-side audit is therefore MIXED by
+    design: some calls show the human, some the service account. Every
+    tool call records `effective_pce_mode` in the server audit log so an
+    operator can tell which, and check-pce-credentials-status tells the
+    user which they are about to be.
 """
 from __future__ import annotations
 
@@ -15,11 +22,12 @@ import os
 from typing import Literal
 
 
-PCEMode = Literal["per_user", "shared"]
+PCEMode = Literal["per_user", "shared", "hybrid"]
 PER_USER: PCEMode = "per_user"
 SHARED: PCEMode = "shared"
+HYBRID: PCEMode = "hybrid"
 
-_VALID = (PER_USER, SHARED)
+_VALID = (PER_USER, SHARED, HYBRID)
 
 
 def load_pce_mode_from_env() -> PCEMode:
@@ -34,3 +42,17 @@ def load_pce_mode_from_env() -> PCEMode:
 
 def is_shared_mode(mode: PCEMode | str | None) -> bool:
     return mode == SHARED
+
+
+def is_hybrid_mode(mode: PCEMode | str | None) -> bool:
+    return mode == HYBRID
+
+
+def uses_keystore(mode: PCEMode | str | None) -> bool:
+    """per_user and hybrid read the keystore; shared never does."""
+    return mode in (PER_USER, HYBRID)
+
+
+def uses_shared_env(mode: PCEMode | str | None) -> bool:
+    """shared and hybrid need the PCE_* env the stdio transport uses."""
+    return mode in (SHARED, HYBRID)

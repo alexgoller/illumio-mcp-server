@@ -141,13 +141,14 @@ The server logs a prominent warning. Do NOT use in production.
 
 ### Two PCE modes (Phase 3b vs Phase 3e)
 
-The HTTP server supports two ways to source PCE credentials, selected via
+The HTTP server supports three ways to source PCE credentials, selected via
 `MCP_PCE_MODE`:
 
 | Mode | `MCP_PCE_MODE` | PCE creds | Onboarding | PCE-side audit |
 |---|---|---|---|---|
 | **Per-user** (default) | `per_user` | One PCE API key per authenticated user, encrypted in keystore | User registers via `/setup` page or `register-pce-credentials` tool | PCE logs show the real human via per-user API key |
 | **Shared** | `shared` | One PCE service-account key from env (same as stdio) | None — works immediately for any authenticated user | PCE logs show the service account; the MCP audit log is the source of truth for "who did what" |
+| **Hybrid** | `hybrid` | Per-user key where the user registered one; the shared service account otherwise | Optional — works immediately; `/setup` lets a user opt into attribution | **Mixed by design**: the human where registered, the service account elsewhere. Every MCP audit row records `effective_pce_mode` so you can tell which |
 
 **Choose per-user when:**
 - You want PCE-side audit attribution to identify the human
@@ -159,6 +160,16 @@ The HTTP server supports two ways to source PCE credentials, selected via
 - You want zero-friction onboarding (no `/setup` step)
 - You're OK relying on the MCP audit log alone for human-level attribution
 - You operate the PCE service account yourself and rotate it on a schedule
+
+**Choose hybrid when:**
+- You rolled out in shared mode and want a stepwise migration to per-user
+- Compliance needs named PCE-side attribution for *some* users without forcing everyone to onboard
+- You accept that the PCE audit log is mixed, and will read `effective_pce_mode` in the MCP audit log
+
+Hybrid requires both the shared env (`PCE_*`, `API_*`) and `MCP_KEK`; it refuses to
+start without either. `check-pce-credentials-status` reports the mode that applies
+to the calling user **for this request** — including the case where their stored
+key exists but could not be used and the call ran as the service account.
 
 In **shared** mode, `/setup` is not mounted, the credential-management tools
 (`register-pce-credentials`, `delete-pce-credentials`) refuse with a friendly
