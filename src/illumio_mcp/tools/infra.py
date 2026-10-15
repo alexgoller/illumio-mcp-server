@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import mcp.types as types
 from ..pce import PCE_ORG_ID
 from ..log_scrub import ScrubbedArgs
@@ -9,21 +10,39 @@ logger = logging.getLogger('illumio_mcp')
 
 
 def handle_check_pce_connection(ctx, arguments: dict) -> list:
+    """Is the PCE answering, and how fast. The diagnostic tool, so it reports
+    what it saw and how long it waited rather than just failing."""
     logger.debug("Initializing PCE connection")
+    pce = ctx.pce
+    started = time.monotonic()
     try:
-        pce = ctx.pce
-        connection_status = pce.check_connection()
-        return [types.TextContent(
-            type="text",
-            text=f"PCE connection successful: {connection_status}"
-        )]
+        # One GET first, no org, so a dead PCE is reported after a single
+        # bounded request instead of after the SDK's two-call check.
+        response = pce.get('/health', include_org=False)
+        health_ms = (time.monotonic() - started) * 1000
+        status = pce.check_connection()
+        return [types.TextContent(type="text", text=json.dumps({
+            "status": "ok",
+            "pce": f"{pce._hostname}:{pce._port}",
+            "org_id": pce.org_id,
+            "health_http_status": response.status_code,
+            "health_round_trip_ms": round(health_ms),
+            "total_seconds": round(time.monotonic() - started, 2),
+            "connection_check": bool(status),
+        }))]
     except Exception as e:
-        error_msg = f"Failed in PCE operation: {describe_error(e)}"
+        waited = time.monotonic() - started
+        error_msg = (f"PCE did not answer GET /health on {pce._hostname}:{pce._port} "
+                     f"after {waited:.1f} seconds: {describe_error(e)}")
         logger.error(error_msg, exc_info=True)
-        return [types.TextContent(
-            type="text",
-            text=f"Error: {error_msg}"
-        )]
+        return [types.TextContent(type="text", text=json.dumps({
+            "status": "unreachable",
+            "error": error_msg,
+            "hint": ("A 5xx here is the PCE or its front end, not this server; a "
+                     "timeout is the network or a PCE that accepts connections but "
+                     "does not respond. Retries and timeouts are bounded by "
+                     "MCP_PCE_RETRIES / MCP_PCE_REQUEST_TIMEOUT."),
+        }))]
 
 
 def handle_get_events(ctx, arguments: dict) -> list:

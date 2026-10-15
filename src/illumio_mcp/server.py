@@ -2600,7 +2600,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="check-pce-connection",
-            description="Are my credentials and the connection to the PCE working?",
+            description="Is the PCE answering, and how fast. Probes GET /health first and returns JSON: status (ok | unreachable), health_http_status, health_round_trip_ms, total_seconds. On failure the error names the host, how long it waited and the HTTP status or timeout -- a 5xx is the PCE or its front end, a timeout is the network. Waits are bounded (MCP_PCE_RETRIES, MCP_PCE_REQUEST_TIMEOUT); run this first when any other tool returns tool_timeout.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -3687,8 +3687,21 @@ from .log_scrub import SENSITIVE_ARG_KEYS as _SENSITIVE_ARG_KEYS  # noqa: E402
 from .log_scrub import scrub_arguments_for_log as _scrub_arguments_for_log  # noqa: E402
 
 
+def _tool_timeout_seconds() -> float:
+    """Wall-clock budget for one tool call, read per call so tests and
+    operators can change it without a restart."""
+    try:
+        return float(os.environ.get("MCP_TOOL_TIMEOUT_SECONDS", "300"))
+    except ValueError:
+        return 300.0
+
+
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    # INFO, not DEBUG: when a tool hangs, the completion line never comes, and
+    # a server log that records only completions says nothing about which
+    # tool it was. The arguments stay at DEBUG.
+    logger.info("Tool %s called", name)
     logger.debug("Tool called: %s with arguments: %s", name, _scrub_arguments_for_log(arguments))
     spec = TOOL_REGISTRY.get(name)
     if spec is None:
@@ -3783,7 +3796,25 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
 
     try:
         t0 = time.monotonic()
-        result = await asyncio.to_thread(spec.handler, ctx, arguments or {})
+        deadline = _tool_timeout_seconds()
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(spec.handler, ctx, arguments or {}), deadline)
+        except asyncio.TimeoutError:
+            # The handler thread cannot be cancelled; it runs on and its result
+            # is dropped. The caller, who has been staring at nothing, gets an
+            # answer that names the tool and how long it waited.
+            logger.error("Tool %s exceeded %ss and was abandoned", name, deadline)
+            _audit("error", f"tool_timeout after {deadline}s")
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "tool_timeout",
+                "tool": name,
+                "after_seconds": deadline,
+                "message": (f"{name} did not finish within {deadline} seconds. The PCE is "
+                            f"usually the reason: run check-pce-connection to see whether "
+                            f"it answers and how fast, then narrow the query (window, "
+                            f"labels) or raise MCP_TOOL_TIMEOUT_SECONDS."),
+            }, indent=2))]
         elapsed = time.monotonic() - t0
         logger.info(f"Tool {name} completed in {elapsed:.2f}s")
         _audit("allowed", None)

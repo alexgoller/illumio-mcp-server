@@ -119,7 +119,7 @@ which other apps communicate with this... |
 
 | Tool | Access | Type | Description |
 |---|---|---|---|
-| `check-pce-connection` | reader | *read* | Are my credentials and the connection to the PCE working? |
+| `check-pce-connection` | reader | *read* | Is the PCE answering, and how fast. Probes GET /health first and returns JSON: status (ok \| unreachable), health_http_status,... |
 | `check-pce-credentials-status` | reader | *read* | Check which PCE credentials apply to the current user without revealing secrets. Always carries `mode`: per_user (your own key)... |
 | `delete-pce-credentials` | reader | **write** | Remove the current user's stored PCE credentials. Idempotent — safe to call even if no credentials are stored. |
 | `get-events` | reader | *read* | Get events from the PCE with optional filtering |

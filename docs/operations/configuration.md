@@ -22,6 +22,19 @@ These are the PCE connection settings used by stdio mode and by HTTP shared mode
 | `API_KEY` | Always | — | String | `api_key_abc123` |
 | `API_SECRET` | Always | — | String | `secret_xyz...` |
 | `PCE_TLS_VERIFY` | Optional | `true` | `true` or `false` | `false` (disable for self-signed cert) |
+| `MCP_PCE_REQUEST_TIMEOUT` | Optional | `30` | Seconds per HTTP attempt | `15` |
+| `MCP_PCE_RETRIES` | Optional | `1` | Retries per request on 429/5xx or connection failure | `0` |
+| `MCP_PCE_RETRY_AFTER_CAP` | Optional | `15` | Longest `Retry-After` honoured, seconds | `5` |
+| `MCP_TOOL_TIMEOUT_SECONDS` | Optional | `300` | Wall-clock budget for one tool call | `120` |
+
+A PCE that is down must become an **error, quickly, with the status named** --
+not silence. With the Illumio SDK's own policy (5 retries, backoff up to 32 s,
+`Retry-After` honoured without a cap) a front end answering 504 cost about
+three minutes per request, and `check-pce-connection` makes two. The three
+`MCP_PCE_*` knobs bound one request (worst case with the defaults: 2 attempts
+x 30 s + 1 s); `MCP_TOOL_TIMEOUT_SECONDS` bounds the whole call and
+returns `{"error": "tool_timeout", ...}` naming the tool. The handler thread
+cannot be cancelled and runs on; only the caller's wait is bounded.
 
 ---
 

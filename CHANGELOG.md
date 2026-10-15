@@ -22,6 +22,45 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.11.1] — 2026-10-15
+
+### Fixed
+
+- **A dead PCE now produces an error in bounded time, not silence.** Reported
+  from a Claude Desktop session: `tools/call` never answered. Reproduced over
+  stdio against demo100, whose front end was answering **504 Gateway Timeout
+  after ~18 s** on every request. The SDK's retry policy -- 5 retries, backoff
+  2/4/8/16/32 s, 504 in the forcelist, 30 s per attempt, `Retry-After`
+  honoured without a cap -- turned that into ~3 minutes per request, and
+  `check-pce-connection` makes two: six minutes of nothing.
+  - Every client the server builds now carries a bounded policy:
+    `MCP_PCE_RETRIES` (1), `MCP_PCE_REQUEST_TIMEOUT` (30 s),
+    `MCP_PCE_RETRY_AFTER_CAP` (15 s). Worst case for one request with the
+    defaults is 61 s; measured against demo100's 18 s 504s, every tool now
+    answers in 40-60 s with the status named, and a 504 carrying
+    `Retry-After: 600` fails in about a second.
+  - The dispatcher abandons a tool call after `MCP_TOOL_TIMEOUT_SECONDS`
+    (300) and answers `{"error": "tool_timeout", "tool": ..., "after_seconds":
+    ...}` pointing at `check-pce-connection`. The handler thread runs on; only
+    the caller's wait is bounded.
+  - `check-pce-connection` probes `GET /health` first and reports the HTTP
+    status, round-trip time and how long it waited, as JSON; a failure says
+    `PCE did not answer GET /health on host:port after N seconds: ... 504`.
+  - Tool starts are logged at INFO. The server log recorded completions only,
+    so a hung tool left no trace of which tool it was.
+  - The test session's PCE probe is bounded too (one attempt, 10 s), so a down
+    PCE skips the integration tests instead of stalling the suite for minutes.
+
+### Unlearn
+
+- **`check-pce-connection` returns JSON now** (`status`, `health_http_status`,
+  `health_round_trip_ms`, `total_seconds`), not the string
+  `PCE connection successful: True`.
+- **A `tool_timeout` error is not a PCE error.** It means the server stopped
+  waiting; the PCE may still be processing. Check it, then narrow the query.
+
+---
+
 ## [0.11.0] — 2026-10-14
 
 ### Added

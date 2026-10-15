@@ -36,6 +36,23 @@ def get_pce() -> PolicyComputeEngine:
     )
     pce.set_credentials(os.getenv("API_KEY"), os.getenv("API_SECRET"))
     pce._session.verify = os.getenv("PCE_TLS_VERIFY", "true").lower() not in ("false", "0", "no")
+    # Same bounded retry policy the server uses. With the SDK's own defaults a
+    # PCE answering 504 (demo100, 2026-10-15) cost ~3 minutes per request.
+    from illumio_mcp.pce import _install_bounded_waits
+    _install_bounded_waits(pce)
+    return pce
+
+
+def _probe_pce() -> PolicyComputeEngine:
+    """One attempt, ten seconds. The session probe decides whether the PCE
+    tests run at all; it must not itself take minutes when the PCE is down."""
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    pce = get_pce()
+    pce.set_timeout(10)
+    adapter = HTTPAdapter(max_retries=Retry(total=0))
+    pce._session.mount("https://", adapter)
+    pce._session.mount("http://", adapter)
     return pce
 
 
@@ -105,9 +122,10 @@ def pce_unavailable_reason() -> str | None:
     if missing:
         return f"PCE env vars not set: {', '.join(missing)}"
     try:
-        get_pce().labels.get(params={"key": "app", "value": "pos"})
+        _probe_pce().labels.get(params={"key": "app", "value": "pos"})
     except Exception as e:
-        return f"PCE unreachable: {e}"
+        from illumio_mcp.errors import describe_error
+        return f"PCE unreachable: {describe_error(e)}"
     return None
 
 
