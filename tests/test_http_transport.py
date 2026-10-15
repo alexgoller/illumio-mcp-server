@@ -9,6 +9,7 @@ These tests REQUIRE a reachable PCE (same env as test_mcp_tools.py). One test
 exists per important behavior; this is not a substitute for the per-tool
 integration suite — it's the proof that the HTTP transport is wired correctly.
 """
+import json
 import asyncio
 import socket
 import threading
@@ -105,9 +106,10 @@ async def test_check_pce_connection_over_http(http_server_url, requires_pce):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("check-pce-connection", {})
-            text = result.content[0].text
-            assert "successful" in text.lower() or "True" in text, \
-                f"check-pce-connection returned unexpected text: {text!r}"
+            body = json.loads(result.content[0].text)
+            # 0.11.1: JSON with the probe's own numbers, not a sentence.
+            assert body["status"] == "ok" and body["health_http_status"] == 200, body
+            assert body["health_round_trip_ms"] >= 0 and body["connection_check"] is True
 
 
 async def test_get_labels_over_http(http_server_url, requires_pce):

@@ -53,8 +53,10 @@ def assert_no_error(data, context=""):
 class TestConnection:
     async def test_check_pce_connection(self):
         result = await run_tool("check-pce-connection")
-        text = result.content[0].text
-        assert "successful" in text.lower() or "True" in text
+        body = json.loads(result.content[0].text)
+        # 0.11.1: JSON with the probe's own numbers, not a sentence.
+        assert body["status"] == "ok" and body["health_http_status"] == 200, body
+        assert body["pce"].endswith(":443") and body["connection_check"] is True
 
 
 # ---------------------------------------------------------------------------
