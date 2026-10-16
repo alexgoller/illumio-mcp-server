@@ -47,6 +47,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `warnings` lists anything at or above 80% of a limit or above a soft
     limit; `headline` is the one-line answer.
 
+### Security
+
+- **mcp 1.29.1 -> 1.30.0** for GHSA-84m7-p3x7-pcfv (unbounded session
+  accumulation in the Streamable HTTP transport, published 2026-10-15). This
+  server runs the transport stateless, so sessions were never retained here;
+  the floor is raised so nobody has to reason about that. OSV: 1 advisory -> 0.
+
 ### Unlearn
 
 - **A 403 from the PCE is not "no such endpoint".** `get-pce-capacity`

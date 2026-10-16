@@ -9,7 +9,7 @@ dependencies = [
  # NOTE: no "logging" dependency. The PyPI `logging` distribution is a 2005
  # Python-2-era backport; `import logging` always resolves to the stdlib, so
  # depending on it added supply-chain surface for no benefit.
- "mcp>=1.28.1,<2",
+ "mcp>=1.30.0,<2",
  "pandas>=2.2.3",
  "pyjwt[crypto]>=2.15.0",
  "python-dotenv>=1.2.2",
