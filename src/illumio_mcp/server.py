@@ -2607,6 +2607,26 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="get-pce-capacity",
+            description=(
+                "How full is this PCE, against its limits. Reads the documented metrics -- flow storage and "
+                "retention per source vs limits (traffic_flows/database_metrics), managed-workload count over "
+                "time (reports/time_series_statistics), and soft_limit_exceeded / hard_limit_exceeded events "
+                "in the window -- and probes the object-limit API (/api/v2/object_limit_profiles and "
+                "/api/v2/api_usage_limit_profiles, root-level, undocumented). A 403 there is reported as "
+                "'exists but this key is not allowed' (the PCE logs an authorization_failed audit event), a "
+                "404 as 'not on this PCE version', a 200 passed through with a best-effort summary. "
+                "`warnings` lists anything at or above 80% of a limit or above a soft limit."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lookback_days": {"type": "integer", "description": "Window for the workload trend and limit events (default 30, max 365)"},
+                    "include_object_limits": {"type": "boolean", "description": "Probe the object-limit and API-usage-limit routes (default true). Each attempt without permission writes an audit event on the PCE."},
+                },
+            },
+        ),
+        types.Tool(
             name="get-rulesets",
             description=(
                 "Get rulesets and their rules, from draft or active policy, rendered as data: scopes as "

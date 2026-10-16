@@ -22,6 +22,42 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.12.0] — 2026-10-16
+
+### Added
+
+- **`get-pce-capacity`** -- how full the PCE is against its limits, from the
+  endpoints that exist today, plus an honest probe of the one that is gated.
+  - `traffic_flows/database_metrics`: flow storage and retention per source
+    (server, endpoint, scanner, flowlink) as percent of each limit. Live on
+    demo100 this surfaced endpoint retention at 135.7% of its 14-day limit.
+  - `reports/time_series_statistics`: managed-workload count per day over the
+    window, with earliest/latest/change. The spec lists two more properties;
+    this PCE answers 406 `unsupported_property` for both, reported as such.
+  - `events`: `soft_limit_exceeded` / `hard_limit_exceeded` counts and latest.
+  - `/api/v2/object_limit_profiles` and `/api/v2/api_usage_limit_profiles`:
+    the object-limit API. Root-level (no org in the path), absent from the
+    published 26.3 and 26.4 OpenAPI specs, present in their audit-resource
+    list, and it answers **403** to an org-scoped key while logging a
+    `request.authorization_failed` event naming the endpoint. A 403 is
+    reported as "exists, this key is not allowed" with the request id, a 404
+    as "not on this PCE version", a 200 passed through raw with a best-effort
+    soft/hard/current summary -- the shape is unknown until a key with access
+    returns one.
+  - `warnings` lists anything at or above 80% of a limit or above a soft
+    limit; `headline` is the one-line answer.
+
+### Unlearn
+
+- **A 403 from the PCE is not "no such endpoint".** `get-pce-capacity`
+  keeps 403 and 404 apart because that difference is the finding: the
+  object-limit API is there, your key just cannot read it.
+- **`include_object_limits: false`** exists because every probe without
+  permission writes an audit event on the PCE; a scheduled check that cannot
+  read the route should not fill the audit log with its own refusals.
+
+---
+
 ## [0.11.1] — 2026-10-15
 
 ### Fixed

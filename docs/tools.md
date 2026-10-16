@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 52 tools, grouped by area. Generated from the server's own registry by
+All 53 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -124,6 +124,7 @@ which other apps communicate with this... |
 | `delete-pce-credentials` | reader | **write** | Remove the current user's stored PCE credentials. Idempotent — safe to call even if no credentials are stored. |
 | `get-events` | reader | *read* | Get events from the PCE with optional filtering |
 | `get-pairing-profiles` | reader | *read* | Get pairing profiles from the PCE. Pairing profiles define the initial enforcement mode and labels for VENs when they pair with... |
+| `get-pce-capacity` | reader | *read* | How full is this PCE, against its limits. Reads the documented metrics -- flow storage and retention per source vs limits (traf... |
 | `register-pce-credentials` | operator | **write** | Register (or overwrite) PCE credentials for the current authenticated user. After registering, all PCE tools become available i... |
 
 ## Other
