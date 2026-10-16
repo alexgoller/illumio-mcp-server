@@ -348,5 +348,6 @@ def test_too_many_buckets_is_rejected_with_a_coarser_suggestion(monkeypatch):
     assert "error" in out and "coarser" in out["error"].lower()
 
 
-def test_tool_count_is_now_52():
-    assert len(TOOL_REGISTRY) == 52
+def test_the_three_tools_are_registered():
+    # The count canary lives in test_tool_metadata; a second one only drifts.
+    assert {"get-traffic-timeline", "get-workloads", "get-rulesets"} <= set(TOOL_REGISTRY)

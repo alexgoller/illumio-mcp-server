@@ -83,6 +83,7 @@ from .credentials import (
 from .sec_rules import handle_update_sec_rule, handle_delete_sec_rule
 from .identity import handle_build_identity_graph
 from .meta import handle_get_server_changelog
+from .capacity import handle_get_pce_capacity
 
 
 _OP_ADMIN = frozenset({OPERATOR, ADMIN})
@@ -161,6 +162,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     # Server self-description. No PCE, readable by everyone: a session needs
     # this precisely when it cannot trust its cached view of the server.
     "get-server-changelog":       ToolSpec(handle_get_server_changelog, roles=ALL_ROLES, requires_pce=False),
+    "get-pce-capacity":           ToolSpec(handle_get_pce_capacity,     roles=ALL_ROLES),
 }
 
 
