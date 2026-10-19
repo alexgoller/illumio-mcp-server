@@ -18,6 +18,7 @@ when you actually want them.
 | "What talks to what?" | `get-traffic-flows-summary` | **aggregated tuples**, whole window |
 | "Show me the actual flows" | `get-traffic-flows` | **raw flow rows**, capped at 500 |
 | "Which process is going where?" | `discover-process-egress` | aggregated findings per process |
+| "Which IPs talk to my workloads that the PCE does not know?" | `find-unknown-endpoints` | one profile per unknown address |
 | "Group by my own dimensions" | `get-traffic-flows-summary` + `group_by` | tuples on your keys |
 
 The split matters: the summary reads the **whole window** and hands back tuples;
@@ -241,3 +242,56 @@ flows per day, so a 1h timeline of last week is mostly day-wide rows whose
 the midnight bucket: a "27x spike" that was the aggregation. The response
 reports `rows_spanning_buckets`, derives `effective_bucket` from the median row
 span, and caveats `spikes` when the requested bucket is finer than the data.
+
+---
+
+## Unknown endpoints: addresses the PCE does not know
+
+```
+find-unknown-endpoints  { "lookback_days": 7, "direction": "both" }
+find-unknown-endpoints  { "lookback_days": 7, "ip": "10.20.30.40" }
+```
+
+An endpoint is **unknown** when Explorer attached no workload to that side of
+the flow **and** its IP is not an interface address of any inventoried
+workload. Managed and unmanaged workloads both carry a workload object, so an
+inventoried unmanaged workload is not unknown; the inventory join catches
+workloads created after the flows were recorded and unmanaged workloads whose
+hostname is empty. IP-list membership does not make an endpoint known: it is
+reported under `ip_lists`, with the default `0.0.0.0/0` list dropped, because
+a /8 in a list is not an inventory entry.
+
+This is **not** `find-unmanaged-traffic`. That tool's test is "no `app`
+label": it lists an unlabelled VEN and drops a labelled unmanaged workload.
+`find-unknown-endpoints` counts unlabelled workloads in
+`totals.unlabelled_workloads_seen` and does not profile them.
+
+Three pulls: one Explorer query over the window (allowed, potentially blocked
+and blocked), one workload inventory, one draft IP-list read. Each reports its
+own truncation (`flows_truncated`, `inventory_truncated`,
+`ip_lists_truncated`); `coverage_note` says what that does to the answer.
+
+Per endpoint: `address_class` (private, public, or a noise class), `fqdn`,
+`ip_lists`, `likely_provider` for public addresses, `neighbourhood` (the /24
+or /64 it shares with N managed workloads: the strongest "this host should
+have a VEN" signal), `as_source` and `as_destination` blocks with connections,
+peer workloads, peer apps as `app (env)`, top-10 ports with an `admin` flag,
+the policy mix and first/last seen, `peers_enforced`, and `profile`:
+
+| Shape | Test |
+|---|---|
+| `scanner` | >= 10 peer x port pairs, median <= 3 connections per pair, >= 70% blocked or potentially blocked |
+| `fan_in_server` | destination for >= 5 peer apps on <= 3 ports |
+| `admin_reach` | source touching an admin port (22, 3389, 445, 1433, ...) on a workload |
+| `high_volume` | >= 10x the median connections over unknown endpoints in that direction (needs >= 5) |
+| `single_peer` | exactly one peer workload |
+
+`profile_evidence` carries the numbers each test used. Link-local, multicast,
+broadcast and loopback addresses are counted in `totals.noise_endpoints` and
+listed only with `include_noise: true`.
+
+With `ip` set the tool profiles one address: Explorer is filtered to it
+server-side (one query per direction), the peer x port table is complete
+instead of top-10, and a `timeline` is added using the same bucketing and
+spike rule as `get-traffic-timeline` (1h buckets up to two days, else 1d).
+An address that is in the inventory is answered as `known` without a query.

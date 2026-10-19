@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 53 tools, grouped by area. Generated from the server's own registry by
+All 54 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -85,6 +85,7 @@ Builds an app-to-app communication graph and com... |
 
 | Tool | Access | Type | Description |
 |---|---|---|---|
+| `find-unknown-endpoints` | reader | *read* | Which IP addresses show up in traffic that the PCE does not know as a workload at all, and what do they do. Unknown = Explorer... |
 | `find-unmanaged-traffic` | reader | *read* | Find traffic involving unmanaged (unlabeled) workloads or IP addresses. These are sources or destinations without app/env label... |
 | `get-traffic-flows` | reader | *read* | Get traffic flows from the PCE with comprehensive filtering options |
 | `get-traffic-flows-summary` | reader | *read* | Summarize traffic flows as structured JSON. Sections: by_process (which binary talks to which destination, on which port, under... |

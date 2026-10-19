@@ -3523,6 +3523,44 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
             }
         ),
         types.Tool(
+            name="find-unknown-endpoints",
+            description=(
+                "Which IP addresses show up in traffic that the PCE does not know as a workload at "
+                "all, and what do they do. Unknown = Explorer attached no workload to that side of "
+                "the flow AND the IP is not an interface address of any inventoried workload "
+                "(managed or unmanaged). Not the same as find-unmanaged-traffic, whose test is "
+                "'no app label'. One Explorer pull, one workload pull, one IP-list pull. Per "
+                "endpoint: fqdn, address_class (private | public | link_local | multicast | "
+                "broadcast | loopback), ip_lists (named lists containing it; the 0.0.0.0/0 default "
+                "list is dropped), likely_provider for public addresses, neighbourhood (the /24 or "
+                "/64 it shares with N managed workloads), as_source / as_destination blocks "
+                "(connections, flows, peer workloads, peer apps as 'app (env)', top-10 ports with "
+                "an admin flag, policy mix, first/last seen), peers_enforced, and profile shapes: "
+                "scanner, fan_in_server, admin_reach, high_volume, single_peer, with the numbers "
+                "each test used. Noise classes are counted but listed only with include_noise. "
+                "With `ip` set, profiles that one address: full peer x port table and a timeline "
+                "(1h buckets up to two days, else 1d) with the shared spike rule. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to lookback_days ago"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to today"},
+                    "lookback_days": {"type": "integer", "description": "Used when start_date is omitted (default 7)"},
+                    "direction": {"type": "string", "enum": ["inbound", "outbound", "both"], "description": "Relative to workloads: inbound = unknown sources reaching workloads (as_source), outbound = workloads reaching unknown destinations (as_destination). Default both."},
+                    "min_connections": {"type": "integer", "description": "Drop endpoints with fewer connections in the chosen direction (default 1)"},
+                    "top_n": {"type": "integer", "description": "Endpoints to return, ranked by connections (default 50). totals.unknown_endpoints says how many exist."},
+                    "ip": {"type": "string", "description": "Profile this one address instead of listing: Explorer is filtered to it server-side, the peer x port table is complete, and a timeline is added. An address that is in the inventory is reported as known without a query."},
+                    "include_noise": {"type": "boolean", "description": "Also list link-local, multicast, broadcast and loopback endpoints under `noise` (default false; they are always counted)"},
+                    "policy_decisions": {"type": "array", "items": {"type": "string", "enum": ["allowed", "potentially_blocked", "blocked", "unknown"]}, "description": "Default ['allowed', 'potentially_blocked', 'blocked']"},
+                    "include_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}, "description": "Restrict the pull to these services, as in the other traffic tools"},
+                    "max_results": {"type": "integer", "description": "Explorer cap per query (default 200000); totals.flows_truncated says when it was hit"},
+                    "max_workloads": {"type": "integer", "description": "Inventory cap (default 10000); totals.inventory_truncated says when it was hit"},
+                    "query_name": {"type": "string"},
+                },
+            },
+        ),
+        types.Tool(
             name="detect-lateral-movement-paths",
             description="Analyze traffic patterns to detect potential lateral movement paths — chains of connections that could allow an attacker to pivot between applications. Identifies apps that serve as bridges between otherwise disconnected app groups.",
             inputSchema={
