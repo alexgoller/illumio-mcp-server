@@ -591,6 +591,72 @@ Illumio's override deny rules provide this — they block traffic instantly, ove
 This maps directly to DORA's requirement for rapid containment during ICT incidents.
 """
     },
+    "illumio://compliance/nis2": {
+        "name": "NIS2 Segmentation Evidence Requirements",
+        "description": "Directive (EU) 2022/2555 Art 21(2) and Implementing Regulation (EU) 2024/2690 Annex sections mapped to Illumio segmentation evidence",
+        "content": """# NIS2 — Network and Information Security with Illumio
+
+## Overview
+NIS2 (Directive (EU) 2022/2555) requires essential and important entities to take
+"appropriate and proportionate technical, operational and organisational measures" to
+manage the risks to the security of network and information systems (Article 21(1)).
+Article 21(2) lists the minimum measures. For the entities it covers, Commission
+Implementing Regulation (EU) 2024/2690 lays down the technical and methodological
+requirements for those measures; its Annex is the checklist auditors and national
+authorities work from. National transposition (for example the German NIS2UmsuCG)
+adds the registration, reporting and liability duties; the technical measures are
+those of the Annex.
+
+## Who Must Comply
+Essential and important entities in the sectors of Annex I and II of the Directive:
+energy, transport, banking, financial market infrastructure, health, drinking water,
+digital infrastructure, ICT service management, public administration, space,
+postal, waste, chemicals, food, manufacturing, digital providers and research. For
+digital infrastructure and ICT service providers the Implementing Regulation applies
+directly.
+
+## Requirement Mapping
+
+### Article 21(2) — minimum measures
+- **21(2)(a)** — Policies on risk analysis and information system security
+  - Illumio: the ruleset for a scope IS the documented network access policy; `get-rulesets pversion=active` is the evidence
+- **21(2)(b)** — Incident handling
+  - Illumio: blocked and potentially blocked flows are the detection signal; `get-traffic-timeline` shows when; `get-events` shows who changed what
+- **21(2)(e)** — Security in network and information systems acquisition, development and maintenance
+  - Illumio: segmentation of the systems delivering the essential service; `compare-draft-active` shows change in flight
+- **21(2)(f)** — Policies and procedures to assess the effectiveness of the measures
+  - Illumio: `collect-compliance-evidence` re-run per review period; drift between runs is the effectiveness record
+- **21(2)(i)** — Human resources security, access control policies and asset management
+  - Illumio: labelled workload inventory (`get-workloads`), rules that name who may reach what
+- **21(2)(j)** — Multi-factor or continuous authentication, secured communications
+  - Illumio: cleartext ports admitted into a scope are flagged for review (21, 23, 69, 80, 110, 143, 389)
+
+### Implementing Regulation (EU) 2024/2690, Annex
+- **3.2 Monitoring and logging** — procedures and tools to monitor and log activities on the network and information systems, to detect events and identify incidents
+  - Illumio: flow logs for the window (`get-traffic-flows-summary` totals), the blocked-flow timeline, PCE events; retention period is an attestation
+- **6.7 Network security** — network connections and services are controlled and protected; access to the network restricted to authorised devices and users; traffic filtered according to documented rules
+  - Illumio: every providing rule has a description (the documented rule); no broad consumer into the scope; admitted services versus the approved list
+- **6.8 Network segmentation** — systems are segmented into zones according to trust, criticality and the service delivered, with controls between the zones
+  - Illumio: app/env scope pairs in full enforcement with healthy VENs; allowed boundary crossings listed and approved; zero potentially blocked flows into the scope
+- **11 Access control** — logical and physical access control policy for the network and information systems, based on business and security requirements
+  - Illumio: rules naming consumers by label, not by address; no all-workloads or 0.0.0.0/0 consumer into the scope
+- **12.4 Asset inventory** — a complete, accurate, up-to-date and consistent inventory of assets, under change control
+  - Illumio: the labelled workload inventory per scope pair, managed and unmanaged, with VEN status and heartbeat; unknown endpoints inside scope subnets are a finding
+
+## Evidence
+`collect-compliance-evidence scope=[{app, env}, ...] lookback_days=30` returns the tests
+above as PASS / FAIL / EXCEPTION / NOT_TESTED with rows, from ACTIVE policy. The
+illumio-compliance-evidence skill maps them to the Annex sections and renders the pack.
+`compliance-check framework=nis2` is a first look only; it reads draft and scores heuristics.
+
+## NIS2-Specific Segmentation Strategy
+1. **Inventory**: label every workload of the essential service (app, env) and confirm the pairs with the service owner
+2. **Segment**: ringfence each pair; move to full enforcement once the boundary rules are approved
+3. **Document**: a description on every providing rule, and an approved-service list with justifications
+4. **Monitor**: blocked flows per day for the scope; a spike is an event to assess (Annex 3.4)
+5. **Review**: re-run the evidence each review period; pending draft changes are listed, not hidden
+"""
+    },
     "illumio://compliance/nist-800-53": {
         "name": "NIST 800-53 Security Controls",
         "description": "NIST 800-53 Rev 5 controls mapped to Illumio segmentation capabilities",
@@ -3617,13 +3683,13 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
         ),
         types.Tool(
             name="compliance-check",
-            description="Check policy compliance against common frameworks (PCI-DSS, NIST, CIS). Identifies workloads in specific compliance scopes and verifies that segmentation policies meet framework requirements.",
+            description="First look at policy posture against a framework (PCI-DSS, DORA, NIS2, NIST, CIS, ISO 27001, SWIFT CSP, HIPAA): keyword-routed heuristics on draft policy and recent traffic, summarised as a score. Not audit evidence: for per-test results from ACTIVE policy for an app/env scope use collect-compliance-evidence. An unknown app_name or env_name label is an error, not an estate-wide run.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "framework": {
                         "type": "string",
-                        "enum": ["pci-dss", "dora", "nist", "cis", "iso-27001", "swift-csp", "hipaa", "general"],
+                        "enum": ["pci-dss", "dora", "nis2", "nist", "cis", "iso-27001", "swift-csp", "hipaa", "general"],
                         "description": "Compliance framework to check against (default: general). Read the corresponding illumio://compliance/* resource for detailed framework guidance.",
                         "default": "general"
                     },
@@ -3641,6 +3707,86 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                         "default": 30
                     }
                 },
+            }
+        ),
+        types.Tool(
+            name="collect-compliance-evidence",
+            description=(
+                "Audit evidence for segmentation controls, per app/env scope pair, from ACTIVE policy "
+                "(pversion=active by default) and observed traffic. Runs the framework-independent tests "
+                "the illumio-compliance-evidence skill defines (T1 inventory, T2 enforcement, T3 VEN health, "
+                "T4 unmanaged in scope, T5 providing rules described, T6 no broad consumer, T7 admitted "
+                "services vs approved list, T8 inbound boundary flows with potentially-blocked and blocked "
+                "evidence plus a per-day timeline, T9 outbound crossings, T11 draft-vs-active drift for the "
+                "scope's rulesets, T14 events and flows present) and returns, per test and per pair, "
+                "{result: PASS|FAIL|EXCEPTION|NOT_TESTED, measured, rows, evidence}. No score. A capped "
+                "pull never yields PASS (EXCEPTION). An unknown scope label is an error. T10 (unknown "
+                "endpoints), T12 and T13 (attestations) are listed in not_run. Framework requirement "
+                "mapping stays in the illumio://compliance/* resources. Read-only. Query cost: scope-wide one "
+                "pull each of labels, rulesets, IP lists, services, pending changes and events, plus per "
+                "pair one workload pull, four traffic queries and one deny-rule read per matched ruleset; "
+                "`queries` reports the count."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "app": {"type": "string", "description": "app label value"},
+                                "env": {"type": "string", "description": "env label value"},
+                            },
+                            "required": ["app", "env"],
+                        },
+                        "description": "Scope pairs, e.g. [{\"app\": \"pay\", \"env\": \"prod\"}]. Each is resolved to label hrefs; an unknown value is an error listing the valid values.",
+                    },
+                    "pversion": {
+                        "type": "string",
+                        "enum": ["active", "draft"],
+                        "default": "active",
+                        "description": "Policy version the ruleset tests read. Evidence packs cite active; echoed as policy_version.",
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Traffic and event window ending today (default 30; PCI packs use 90). Ignored when start_date and end_date are given.",
+                    },
+                    "start_date": {"type": "string", "description": "Window start, YYYY-MM-DD (with end_date)."},
+                    "end_date": {"type": "string", "description": "Window end, YYYY-MM-DD (with start_date)."},
+                    "approved_services": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "port": {"type": "integer"},
+                                "proto": {"type": "string", "description": "tcp or udp (default tcp)"},
+                                "direction": {"type": "string", "enum": ["in", "out"], "description": "in: admitted into the scope (T7, T8); out: destinations the scope may reach (T9)"},
+                                "justification": {"type": "string"},
+                            },
+                            "required": ["port", "direction"],
+                        },
+                        "description": "The organisation's approved service list. Without it the approved-list clauses of T7, T8 and T9 are NOT_TESTED and the observed set is returned as the candidate list.",
+                    },
+                    "tests": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Subset of test ids to run, e.g. [\"T1\", \"T2\", \"T5\"]. Default: every runnable test (T1-T9, T11, T14). The inventory (T1 data) is always collected because an empty pair makes the rest NOT_TESTED.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "default": 500,
+                        "description": "Row cap per traffic query (default 500). A query returning exactly the cap is capped and cannot PASS; narrow the window or raise this.",
+                    },
+                    "max_rows": {
+                        "type": "integer",
+                        "default": 200,
+                        "description": "Evidence rows returned per test and pair (default 200); rows_total and rows_truncated say when more exist.",
+                    },
+                },
+                "required": ["scope"],
             }
         ),
         types.Tool(

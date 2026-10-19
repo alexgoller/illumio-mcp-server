@@ -420,7 +420,8 @@ without an interactive session model. Requires the IdP to issue `auth_time`
 
 ### Security Analysis
 - `detect-lateral-movement-paths` — **Detect potential lateral movement paths** by analyzing app-to-app traffic patterns. Identifies articulation points (bridge nodes) whose compromise would provide access to otherwise disconnected app groups. Computes reachability from any starting app and traces multi-hop paths up to a configurable depth.
-- `compliance-check` — **Check policy compliance** against frameworks (PCI-DSS, NIST 800-53, CIS Controls, or general best practices). Evaluates segmentation, enforcement modes, high-risk port exposure, and policy coverage. Returns a compliance score with per-check findings (PASS/FAIL/WARNING).
+- `compliance-check` — **First look at policy posture** against a framework (PCI-DSS, DORA, NIS2, NIST 800-53, CIS Controls, ISO 27001, SWIFT CSP, HIPAA, or general best practices). Keyword-routed heuristics on draft policy and recent traffic, summarised as a score with per-check findings (PASS/FAIL/WARNING). Not audit evidence.
+- `collect-compliance-evidence` — **Audit evidence for segmentation controls** per app/env scope pair, from **active** policy and observed traffic: inventory, enforcement, VEN health, unmanaged workloads, described providing rules, no broad consumer, admitted services versus an approved list, inbound and outbound boundary crossings with a blocked-flow timeline, draft-versus-active drift, events and flows in the window. Per test and pair: PASS/FAIL/EXCEPTION/NOT_TESTED with the rule, the measured values and the rows. A capped pull never passes. Framework mapping lives in the `illumio://compliance/*` resources.
 
 ### Event Monitoring
 - `get-events` — Get PCE events with optional filtering by event type, severity, status, and result limits

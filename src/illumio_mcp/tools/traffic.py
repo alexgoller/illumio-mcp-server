@@ -639,22 +639,27 @@ def to_dataframe(pce, flows):
 NA = "-"
 
 
-def raw_flows_to_dataframe(pce, raw_flows: list) -> pd.DataFrame:
+def raw_flows_to_dataframe(pce, raw_flows: list, label_map: dict | None = None) -> pd.DataFrame:
     """Build a DataFrame from raw Explorer JSON, keeping process and FQDN.
 
     Unlike the typed path this preserves service.process_name,
     service.windows_service_name, service.user_name and dst.fqdn.
+
+    `label_map` ({href: {key, value}}) skips the label read for callers that
+    already hold one -- a tool issuing several queries per call would
+    otherwise re-read the label list once per query.
     """
     if not raw_flows:
         logger.warning("Empty flows list received")
         return pd.DataFrame()
 
-    label_href_map = {}
-    try:
-        for l in pce.labels.get(params={'max_results': 10000}):
-            label_href_map[l.href] = {"key": l.key, "value": l.value}
-    except Exception:
-        logger.exception("Could not load labels; flows will lack label columns")
+    label_href_map = dict(label_map) if label_map is not None else {}
+    if label_map is None:
+        try:
+            for l in pce.labels.get(params={'max_results': 10000}):
+                label_href_map[l.href] = {"key": l.key, "value": l.value}
+        except Exception:
+            logger.exception("Could not load labels; flows will lack label columns")
 
     def node(side: dict, prefix: str, row: dict) -> None:
         row[f'{prefix}_ip'] = side.get('ip')

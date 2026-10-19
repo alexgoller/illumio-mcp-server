@@ -10,6 +10,7 @@ from illumio.util.jsonutils import Reference
 
 from ..log_scrub import ScrubbedArgs
 from ..errors import describe_error
+from ..label_refs import encode_label_filter, unresolved_label_error
 from .traffic import to_dataframe, to_query_start, to_query_end
 from .constants import MCP_QUERY_MAX_RESULTS
 
@@ -19,15 +20,17 @@ logger = logging.getLogger('illumio_mcp')
 def _label_filter(hrefs) -> str:
     """Encode label HREFs for the PCE's `labels` query parameter.
 
-    The API expects a list of AND-groups, each group a list of OR-alternatives:
-    [["<app href>"], ["<env href>"]] means "has this app AND has this env".
-
-    Passing a flat ["<app>", "<env>"] makes the PCE reject the request with
-    406 invalid_uri, and the href appears brace-wrapped in the error, which
-    reads like a Python set and sends you looking in the wrong place. Verified
-    against a live PCE: flat -> 406, [[a, b]] -> 0 workloads, [[a], [b]] -> 33.
+    One AND block: [["<app href>", "<env href>"]] means "has this app AND has
+    this env". The OUTER list is OR'd, each INNER list AND'd -- the same shape
+    as a ruleset scope. This docstring once said the opposite ([[a], [b]] as
+    AND, measured as 33 workloads on a PCE where no host carried both labels,
+    so the union looked like an intersection). The later measurement in
+    tests/test_label_filters.py is the ground truth: [[a, b]] -> 23 hosts
+    that genuinely carry both, [[a], [b]] -> 138, the union. The code here
+    always produced one block; only the prose disagreed. Kept as a name so
+    existing imports work; the encoding lives in label_refs.
     """
-    return json.dumps([list(hrefs)]) if hrefs else json.dumps([])
+    return encode_label_filter(hrefs)
 
 
 
@@ -88,6 +91,16 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
                 ],
                 "high_risk_ports": [3389, 22, 23, 445, 135, 139, 1433, 3306, 5432, 1521, 27017, 6379],
             },
+            "nis2": {
+                "name": "NIS2 (Directive (EU) 2022/2555)",
+                "checks": [
+                    {"id": "NIS2-21.2(e)", "name": "Network segmentation", "description": "Security in network and information systems; IR 2024/2690 Annex 6.7 network security and 6.8 segmentation"},
+                    {"id": "NIS2-21.2(i)", "name": "Asset inventory and access control", "description": "Asset management (Annex 12.4) and access control policies (Annex 11)"},
+                    {"id": "NIS2-21.2(b)", "name": "Incident handling and monitoring", "description": "Monitoring and logging of network events (Annex 3.2)"},
+                    {"id": "NIS2-21.2(f)", "name": "Enforcement mode", "description": "Policies to assess the effectiveness of measures: workloads enforcing, not only observing"},
+                ],
+                "high_risk_ports": [3389, 22, 23, 445, 135, 139, 1433, 3306, 5432, 1521, 21, 80],
+            },
             "iso-27001": {
                 "name": "ISO 27001:2022",
                 "checks": [
@@ -136,15 +149,24 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
 
         # Get workloads
         params = {"include": "labels", "max_results": 10000}
-        filter_labels = []
-        if app_name:
-            app_labels = pce.labels.get(params={"key": "app", "value": app_name})
-            if app_labels:
-                filter_labels.append(app_labels[0].href)
-        if env_name:
-            env_labels = pce.labels.get(params={"key": "env", "value": env_name})
-            if env_labels:
-                filter_labels.append(env_labels[0].href)
+        # An unknown app/env label used to be dropped silently, which ran the
+        # check estate-wide and reported it as the app's result (#54). The
+        # PCE matches ?value= as a substring, so the exact value is checked.
+        filter_labels, unresolved = [], []
+        for key, value in (("app", app_name), ("env", env_name)):
+            if not value:
+                continue
+            hits = [l for l in pce.labels.get(params={"key": key, "value": value})
+                    if l.key == key and l.value == value]
+            if hits:
+                filter_labels.append(hits[0].href)
+            else:
+                unresolved.append(f"{key}={value}")
+        if unresolved:
+            err = unresolved_label_error(unresolved, pce, keys=("app", "env"))
+            err["message"] = ("These scope labels do not exist in the PCE, so the check was not run. "
+                              "An unknown label would otherwise widen the check to the whole estate.")
+            return [types.TextContent(type="text", text=json.dumps(err, indent=2))]
         if filter_labels:
             params["labels"] = _label_filter(filter_labels)
 
@@ -305,6 +327,7 @@ def handle_compliance_check(ctx, arguments: dict) -> list:
         framework_resource_map = {
             "pci-dss": "illumio://compliance/pci-dss",
             "dora": "illumio://compliance/dora",
+            "nis2": "illumio://compliance/nis2",
             "nist": "illumio://compliance/nist-800-53",
             "iso-27001": "illumio://compliance/iso-27001",
             "swift-csp": "illumio://compliance/swift-csp",
