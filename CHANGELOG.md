@@ -22,6 +22,39 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Traffic include filters accept IPs, IP-list/workload HREFs, FQDNs and
+  transmission types** (#47). `include_sources` / `include_destinations` on
+  `get-traffic-flows`, `get-traffic-flows-summary`, `get-traffic-timeline`,
+  `discover-process-egress` and `build-identity-graph` documented those forms
+  but only labels worked: the server nests entries into one AND-block, and the
+  SDK parses filter strings only at the top level, so `["10.0.0.5"]` reached
+  validation raw and failed with `Invalid value for include: [['10.0.0.5']]`.
+  Every form is now resolved before nesting, the way labels already were:
+  IPv4/IPv6 -> `ip_address`, `/ip_lists/` HREF -> `ip_list`, `/workloads/`
+  HREF -> `workload`, FQDN -> `fqdn`, broadcast/multicast/unicast ->
+  `transmission`. `exclude_*` keeps its flat shape.
+- **An FQDN or transmission filter on the source side is a structured error**
+  (`unsupported_source_filter`), not a PCE rejection of the whole query. The
+  Explorer API only accepts those on destinations; the response names the
+  offending filters and where they belong.
+
+### Unlearn
+
+- **IP, FQDN and IP-list HREF strings in `include_*` now work; the object
+  form is no longer needed.** `include_sources: ["10.20.30.40"]` and
+  `include_sources: ["/orgs/1/sec_policy/draft/ip_lists/1"]` (with the
+  default `exclude_workloads_from_ip_list_query: true`, the "endpoints that
+  are not workloads" idiom) are the documented way. A session that learned to
+  pass `{"ip_list": {"href": ...}}` dicts, or to give up on IP filters, can
+  stop.
+- **`include_sources` never accepted FQDNs or broadcast/multicast/unicast**,
+  whatever the old description said; the PCE rejects them on the consumer
+  side. Put them in `include_destinations` / `exclude_destinations`.
+
 ## [0.12.0] — 2026-10-16
 
 ### Added
