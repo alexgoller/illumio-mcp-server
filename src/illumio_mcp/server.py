@@ -1907,9 +1907,11 @@ PCE → syslog/Fluentd → SIEM
 ### Individual Event Alerts
 High-priority events to alert on immediately:
 - **agent.tampering** — VEN detected unauthorized changes to local firewall rules
-- **enforcement_mode_changed** — workload enforcement mode was modified
-- **policy_provisioned** — security policy was pushed to active
-- **workload.unpaired** — VEN was removed from a managed workload
+- **workload.update** with `enforcement_mode` in its resource changes — workload enforcement mode was modified (`get-events kind=enforcement`)
+- **sec_policy.create** — security policy was provisioned to active (`get-events kind=policy`)
+- **agent.deactivate** / **workloads.unpair** — VEN was removed from a managed workload (`get-events kind=ven`)
+
+These are Illumio's documented event-type names; `get-events` lists which it has verified against a live PCE.
 
 ### Aggregate/Trend Alerts
 Monitor totals and trends:
@@ -2633,7 +2635,9 @@ async def handle_list_tools() -> list[types.Tool]:
                 "[{key, value, href}], consumers/providers as {label: {key, value, href}} | {all_workloads: true} "
                 "| {ip_list: {name, href}} | {label_group: {name, href}}, ingress_services as {port, proto} or "
                 "{service: {name, href}}. Allow, deny and override_deny rules share one shape (rule_type). "
-                "`labels` matches ruleset SCOPE; `actor_labels` returns only the rules that NAME those labels "
+                "Rulesets and rules carry created_at, updated_at, update_type and created_by/updated_by as "
+                "{username, href} when the PCE sends them (username needs GET /users; null if this key may "
+                "not list users). `labels` matches ruleset SCOPE; `actor_labels` returns only the rules that NAME those labels "
                 "as consumer or provider, in any ruleset -- 'the policy that touches app X'. Each ruleset costs "
                 "one extra request for its deny rules, so filter where you can."
             ),
@@ -2683,11 +2687,35 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get-events",
-            description="Get events from the PCE with optional filtering",
+            description=(
+                "PCE audit events as data. Each event carries created_by as {type: user|agent|system, "
+                "username, href}, resource_changes as [{resource_type, href, name, change_type, changes}] "
+                "(which ruleset, rule, workload... changed and how), notifications as "
+                "[{notification_type, info}] and action as {api_endpoint, api_method, src_ip, "
+                "http_status_code}. Filter by event_type (one string or a list, ORed) or by kind: "
+                "policy = sec_policy.create/restore, rule_set.*, sec_rule.*, deny_rule.*, ip_list.*, "
+                "service.* (create/update/delete); enforcement = workloads.bulk_update / workload.update "
+                "whose changes name enforcement_mode; ven = agent.activate/deactivate/tampering/"
+                "clone_detected/suspend/unsuspend, workloads.unpair; auth = user.login/logout/sign_in/"
+                "sign_out/authenticate, request.authorization_failed. Verified on a live PCE (26.30): "
+                "rule_set.*, sec_rule.create/delete, deny_rule.*, ip_list.*, service.*, "
+                "workloads.bulk_update, request.authorization_failed. The rest are Illumio's documented "
+                "names not yet seen on a PCE (expected); event_types_unverified lists them per call. "
+                "The PCE filters on one event_type per request, so a list or kind is one request per "
+                "type, merged newest-first and capped at max_results; event_types_queried echoes the list."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "event_type": {"type": "string", "description": "Filter by event type (e.g., 'system_task.expire_service_account_api_keys')"},
+                    "event_type": {
+                        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                        "description": "Event type string, or a list of them (OR). E.g. 'sec_policy.create' or ['rule_set.update', 'sec_rule.update']. Combines with kind.",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["policy", "enforcement", "ven", "auth"],
+                        "description": "Named group of event types: policy (provisioning, ruleset/rule/ip list/service changes), enforcement (enforcement mode changes), ven (pairing/unpairing/tampering), auth (user login/logout). See the tool description for the exact strings.",
+                    },
                     "severity": {
                         "type": "string",
                         "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"],
