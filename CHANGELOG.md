@@ -56,6 +56,50 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when that key may not list users or the href is a service account.
   "When was this rule last changed, by whom" is now answerable from policy.
 
+- **`find-unknown-endpoints`** (#48) -- which IP addresses show up in traffic
+  that the PCE does not know as a workload at all, and what they do. Unknown
+  means Explorer attached no workload to that side of the flow **and** the IP
+  is not an interface address of any inventoried workload, managed or
+  unmanaged. One Explorer pull over the window (allowed, potentially blocked,
+  blocked), one workload inventory pull, one draft IP-list pull, each with its
+  own truncation flag.
+  - Per endpoint: `fqdn`, `address_class` (private, public, link_local,
+    multicast, broadcast, loopback), `ip_lists` (named lists containing it,
+    exclusions honoured, the `0.0.0.0/0` default list dropped),
+    `likely_provider` for public addresses, `neighbourhood` (the /24 or /64
+    shared with N managed workloads), `as_source` / `as_destination` blocks
+    (connections, flows, peer workloads, peer apps as `app (env)`, top-10
+    ports with an `admin` flag, policy mix, first/last seen,
+    `allowed_into_enforced`), `peers_enforced`, and `profile` shapes with
+    their evidence: `scanner`, `fan_in_server`, `admin_reach`, `high_volume`,
+    `single_peer`. Thresholds match the illumio-unknown-endpoints skill's
+    rubric.
+  - `ip` profiles one address: Explorer is filtered to it server-side (one
+    query per direction), the peer x port table is complete, and a `timeline`
+    reuses the timeline tool's bucketing and spike rule (1h up to two days,
+    else 1d). An inventoried address is answered as `known` without a query.
+  - Noise classes are counted in `totals.noise_endpoints` and listed only with
+    `include_noise`. Unlabelled workloads are counted, not profiled.
+  - Not verified against a live PCE yet; the fixture estate in
+    `tests/test_unknown_endpoints.py` is the contract.
+
+- **`get-iplists` answers as data** (#49). `ip_ranges` is
+  `[{from_ip, to_ip, exclusion, description}]` and `fqdns` is
+  `[{fqdn, description}]`, the same move #45 made for rulesets.
+  - `pversion: draft | active` (default draft), echoed as `policy_version`
+    in the envelope, which keeps `ip_lists` and `total_count`.
+  - `contains_ip: "10.20.30.40"` returns only the lists whose ranges contain
+    that address, evaluated server-side with `ipaddress`: a `from_ip` may be
+    a CIDR, a single address, or the start of a span to `to_ip`; exclusion
+    ranges carve addresses back out; IPv4 and IPv6 never cross. Each
+    returned list carries `matched_range`, and the argument is echoed as
+    `contains_ip`. The existing `ip_address` filter is unchanged and is the
+    PCE's substring match on the range text, which matches `10.20.30.4`
+    against `10.20.30.40/32` and never looks inside a CIDR.
+  - `is_default: true` on any list with an inclusion range equal to
+    `0.0.0.0/0` or `::/0`, so a caller deciding whether an address is
+    "covered by an IP list" can drop the built-in Any list.
+
 ### Changed
 
 - The SIEM resource text named `enforcement_mode_changed`,
@@ -63,6 +107,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exist; it now names `workload.update` / `workloads.bulk_update`,
   `sec_policy.create` and `agent.deactivate` / `workloads.unpair` and points
   at `get-events kind=`.
+
+### Fixed
+
+- **Traffic include filters accept IPs, IP-list/workload HREFs, FQDNs and
+  transmission types** (#47). `include_sources` / `include_destinations` on
+  `get-traffic-flows`, `get-traffic-flows-summary`, `get-traffic-timeline`,
+  `discover-process-egress` and `build-identity-graph` documented those forms
+  but only labels worked: the server nests entries into one AND-block, and the
+  SDK parses filter strings only at the top level, so `["10.0.0.5"]` reached
+  validation raw and failed with `Invalid value for include: [['10.0.0.5']]`.
+  Every form is now resolved before nesting, the way labels already were:
+  IPv4/IPv6 -> `ip_address`, `/ip_lists/` HREF -> `ip_list`, `/workloads/`
+  HREF -> `workload`, FQDN -> `fqdn`, broadcast/multicast/unicast ->
+  `transmission`. `exclude_*` keeps its flat shape.
+- **An FQDN or transmission filter on the source side is a structured error**
+  (`unsupported_source_filter`), not a PCE rejection of the whole query. The
+  Explorer API only accepts those on destinations; the response names the
+  offending filters and where they belong.
 
 ### Unlearn
 
@@ -77,6 +139,37 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   merge; bound it with `timestamp_gte`.
 
 ---
+
+- **`find-unmanaged-traffic` means unlabelled, not unknown.** Its test is "no
+  `app` label", so it lists an unlabelled VEN and drops a labelled unmanaged
+  workload, and it carries no policy decision, FQDN, IP-list name or
+  truncation flag. Use `find-unknown-endpoints` for addresses the PCE does not
+  know; filter `find-unmanaged-traffic` against the inventory if you still use
+  it for that.
+- **An IP-list match is not an inventory entry.** `get-traffic-flows-summary`
+  labels an external destination by its IP-list name, so on a PCE where the
+  default list matches, every unknown destination collapses into one row
+  named `Any (0.0.0.0/0 and ::/0)`. `find-unknown-endpoints` keeps `ip` as its
+  own field and never cites the default list as coverage.
+
+---
+
+- **IP, FQDN and IP-list HREF strings in `include_*` now work; the object
+  form is no longer needed.** `include_sources: ["10.20.30.40"]` and
+  `include_sources: ["/orgs/1/sec_policy/draft/ip_lists/1"]` (with the
+  default `exclude_workloads_from_ip_list_query: true`, the "endpoints that
+  are not workloads" idiom) are the documented way. A session that learned to
+  pass `{"ip_list": {"href": ...}}` dicts, or to give up on IP filters, can
+  stop.
+- **`include_sources` never accepted FQDNs or broadcast/multicast/unicast**,
+  whatever the old description said; the PCE rejects them on the consumer
+  side. Put them in `include_destinations` / `exclude_destinations`.
+
+- **`ip_ranges` are objects now, not `IPRange(...)` text; a session that
+  regexed `from_ip=` out of reprs can stop.** Same for `fqdns`, which were
+  `FQDN(...)` strings. `get-iplists` also reads draft unless told
+  `pversion: active`, and says which in `policy_version`; before, the
+  version was implicit.
 
 ## [0.12.0] — 2026-10-16
 

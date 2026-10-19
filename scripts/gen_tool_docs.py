@@ -27,7 +27,7 @@ GROUPS = [
     ("IP lists", ["iplist"]),
     ("Services", ["service"]),
     ("Rulesets and rules", ["ruleset", "rule"]),
-    ("Traffic analysis", ["traffic", "unmanaged"]),
+    ("Traffic analysis", ["traffic", "unmanaged", "unknown-endpoints"]),
     ("Ringfencing and threat analysis", ["ringfence", "infrastructure", "lateral"]),
     ("Policy and compliance", ["policy", "enforcement", "compliance", "draft"]),
     ("Containers", ["container", "kubernetes"]),

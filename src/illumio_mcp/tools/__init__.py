@@ -84,6 +84,7 @@ from .sec_rules import handle_update_sec_rule, handle_delete_sec_rule
 from .identity import handle_build_identity_graph
 from .meta import handle_get_server_changelog
 from .capacity import handle_get_pce_capacity
+from .unknown_endpoints import handle_find_unknown_endpoints
 
 
 _OP_ADMIN = frozenset({OPERATOR, ADMIN})
@@ -130,6 +131,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     "build-identity-graph":       ToolSpec(handle_build_identity_graph,     roles=ALL_ROLES),
     "discover-process-egress":    ToolSpec(handle_discover_process_egress,    roles=ALL_ROLES),
     "find-unmanaged-traffic":     ToolSpec(handle_find_unmanaged_traffic,   roles=ALL_ROLES, unscopable=True),
+    "find-unknown-endpoints":     ToolSpec(handle_find_unknown_endpoints,   roles=ALL_ROLES, unscopable=True),
     # Policy reports (PCE-wide; not safely scopable)
     "compliance-check":           ToolSpec(handle_compliance_check,         roles=ALL_ROLES, unscopable=True),
     "enforcement-readiness":      ToolSpec(handle_enforcement_readiness,    roles=ALL_ROLES, unscopable=True),

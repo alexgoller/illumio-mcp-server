@@ -2359,12 +2359,12 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to include. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), which the server resolves to a label HREF, as well as label/IP list/workload HREFs, FQDNs and IPs. Omit to match all sources."
+                        "description": "Sources to include. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), which the server resolves to a label HREF, as well as label/IP list/workload HREFs and IPs. FQDNs and broadcast/multicast/unicast are destination-only (the PCE rejects them on sources). Omit to match all sources."
                     },
                     "exclude_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to exclude (label/IP list/workload HREFs, FQDNs, IPs)"
+                        "description": "Sources to exclude (label/IP list/workload HREFs, IPs; FQDNs are destination-only)"
                     },
                     "include_destinations": {
                         "type": "array",
@@ -2439,7 +2439,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Restrict to these sources. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), HREFs, IPs or FQDNs."
+                        "description": "Restrict to these sources. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), label/IP list/workload HREFs or IPs (FQDNs are destination-only)."
                     },
                     "only_named_processes": {
                         "type": "boolean",
@@ -2487,8 +2487,8 @@ async def handle_list_tools() -> list[types.Tool]:
                         "type": "boolean",
                         "description": "Include the identity -> workload -> destination edges. Capped at 400, ranked by connections; the identity rollup answers most questions without them."
                     },
-                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Label filters, e.g. ['app=vdi']"},
-                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Label filters on the destination side"},
+                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Source filters: label HREFs or key=value (ANDed), IP list/workload HREFs, IPs, e.g. ['app=vdi']"},
+                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destination filters, same forms as include_sources plus FQDNs"},
                     "policy_decisions": {"type": "array", "items": {"type": "string"}, "description": "allowed, blocked, potentially_blocked"},
                     "top": {"type": "integer", "description": "Destinations/ports/processes listed per identity (default 10)"},
                 },
@@ -2505,12 +2505,12 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to include (label/IP list/workload HREFs, FQDNs, IPs). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
+                        "description": "Sources to include (label/IP list/workload HREFs, IPs; FQDNs are destination-only). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
                     },
                     "exclude_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to exclude (label/IP list/workload HREFs, FQDNs, IPs). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
+                        "description": "Sources to exclude (label/IP list/workload HREFs, IPs; FQDNs are destination-only). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
                     },
                     "include_destinations": {
                         "type": "array",
@@ -2587,9 +2587,9 @@ async def handle_list_tools() -> list[types.Tool]:
                     "bucket": {"type": "string", "enum": ["15m", "1h", "6h", "1d"], "description": "Bucket size (default 1h). Buckets align to the wall clock, not the window start. Max 2000 buckets."},
                     "split_by": {"type": "string", "enum": ["policy_decision", "direction"], "description": "Add a per-bucket breakdown: by_policy_decision or by_flow_direction"},
                     "spikes": {"type": "boolean", "description": "Add `spikes`: median of non-zero buckets, threshold (3x), the buckets above it and the worst one"},
-                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to include: label HREFs or key=value (entries are ANDed), IP list/workload HREFs, FQDNs, IPs"},
+                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to include: label HREFs or key=value (entries are ANDed), IP list/workload HREFs, IPs. FQDNs are destination-only"},
                     "exclude_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to exclude"},
-                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to include, same forms as include_sources"},
+                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to include, same forms as include_sources plus FQDNs and broadcast/multicast/unicast"},
                     "exclude_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to exclude"},
                     "include_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}},
                     "exclude_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}},
@@ -2663,14 +2663,24 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get-iplists",
-            description="Get IP lists from the PCE with optional filtering",
+            description=(
+                "Get IP lists from the PCE with optional filtering. Each list carries "
+                "ip_ranges as [{from_ip, to_ip, exclusion, description}] and fqdns as "
+                "[{fqdn, description}], plus is_default: true on the built-in list that "
+                "covers 0.0.0.0/0 or ::/0. Use contains_ip for an exact 'which lists "
+                "cover this address' answer, evaluated server-side (CIDRs, from/to "
+                "spans, exclusions, IPv4 and IPv6); the ip_address filter is the PCE's "
+                "substring match on the range text and does not look inside CIDRs."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Filter IP lists by name (supports partial matches)"},
                     "description": {"type": "string", "description": "Filter by description (supports partial matches)"},
                     "fqdn": {"type": "string", "description": "Filter by FQDN (supports partial matches)"},
-                    "ip_address": {"type": "string", "description": "Filter by IP address (supports partial matches)"},
+                    "ip_address": {"type": "string", "description": "PCE-side substring match on the range text (e.g. '10.20.30.4' matches '10.20.30.40/32' and never matches an address inside a CIDR). Use contains_ip for exact containment."},
+                    "contains_ip": {"type": "string", "description": "A single IPv4 or IPv6 address. Return only the IP lists whose ranges contain it, honouring exclusion ranges; each returned list carries matched_range. Combine with is_default to tell 'in a real list' from 'only in Any'."},
+                    "pversion": {"type": "string", "enum": ["draft", "active"], "description": "Policy version to read (default draft). Echoed as policy_version in the response."},
                     "max_results": {"type": "integer", "description": "Maximum number of IP lists to return"},
                 }
             }
@@ -3539,6 +3549,44 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                     }
                 },
             }
+        ),
+        types.Tool(
+            name="find-unknown-endpoints",
+            description=(
+                "Which IP addresses show up in traffic that the PCE does not know as a workload at "
+                "all, and what do they do. Unknown = Explorer attached no workload to that side of "
+                "the flow AND the IP is not an interface address of any inventoried workload "
+                "(managed or unmanaged). Not the same as find-unmanaged-traffic, whose test is "
+                "'no app label'. One Explorer pull, one workload pull, one IP-list pull. Per "
+                "endpoint: fqdn, address_class (private | public | link_local | multicast | "
+                "broadcast | loopback), ip_lists (named lists containing it; the 0.0.0.0/0 default "
+                "list is dropped), likely_provider for public addresses, neighbourhood (the /24 or "
+                "/64 it shares with N managed workloads), as_source / as_destination blocks "
+                "(connections, flows, peer workloads, peer apps as 'app (env)', top-10 ports with "
+                "an admin flag, policy mix, first/last seen), peers_enforced, and profile shapes: "
+                "scanner, fan_in_server, admin_reach, high_volume, single_peer, with the numbers "
+                "each test used. Noise classes are counted but listed only with include_noise. "
+                "With `ip` set, profiles that one address: full peer x port table and a timeline "
+                "(1h buckets up to two days, else 1d) with the shared spike rule. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to lookback_days ago"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to today"},
+                    "lookback_days": {"type": "integer", "description": "Used when start_date is omitted (default 7)"},
+                    "direction": {"type": "string", "enum": ["inbound", "outbound", "both"], "description": "Relative to workloads: inbound = unknown sources reaching workloads (as_source), outbound = workloads reaching unknown destinations (as_destination). Default both."},
+                    "min_connections": {"type": "integer", "description": "Drop endpoints with fewer connections in the chosen direction (default 1)"},
+                    "top_n": {"type": "integer", "description": "Endpoints to return, ranked by connections (default 50). totals.unknown_endpoints says how many exist."},
+                    "ip": {"type": "string", "description": "Profile this one address instead of listing: Explorer is filtered to it server-side, the peer x port table is complete, and a timeline is added. An address that is in the inventory is reported as known without a query."},
+                    "include_noise": {"type": "boolean", "description": "Also list link-local, multicast, broadcast and loopback endpoints under `noise` (default false; they are always counted)"},
+                    "policy_decisions": {"type": "array", "items": {"type": "string", "enum": ["allowed", "potentially_blocked", "blocked", "unknown"]}, "description": "Default ['allowed', 'potentially_blocked', 'blocked']"},
+                    "include_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}, "description": "Restrict the pull to these services, as in the other traffic tools"},
+                    "max_results": {"type": "integer", "description": "Explorer cap per query (default 200000); totals.flows_truncated says when it was hit"},
+                    "max_workloads": {"type": "integer", "description": "Inventory cap (default 10000); totals.inventory_truncated says when it was hit"},
+                    "query_name": {"type": "string"},
+                },
+            },
         ),
         types.Tool(
             name="detect-lateral-movement-paths",
