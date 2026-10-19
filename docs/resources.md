@@ -66,11 +66,12 @@ Framework mappings for segmentation controls.
 | `illumio://compliance/nist-800-53` | NIST 800-53 |
 | `illumio://compliance/iso-27001` | ISO 27001 |
 | `illumio://compliance/dora` | DORA |
+| `illumio://compliance/nis2` | NIS2 |
 | `illumio://compliance/swift-csp` | SWIFT CSP |
 | `illumio://compliance/cis-controls` | CIS Controls |
 | `illumio://compliance/segmentation-methodology` | Segmentation as a compliance control |
 
-The `compliance-check` tool evaluates live policy against several of these.
+The `compliance-check` tool gives a first look against several of these; `collect-compliance-evidence` returns per-test evidence from active policy for a label-pair scope.
 
 ## Operations
 

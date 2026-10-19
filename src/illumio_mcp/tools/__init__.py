@@ -84,6 +84,7 @@ from .sec_rules import handle_update_sec_rule, handle_delete_sec_rule
 from .identity import handle_build_identity_graph
 from .meta import handle_get_server_changelog
 from .capacity import handle_get_pce_capacity
+from .compliance_evidence import handle_collect_compliance_evidence
 
 
 _OP_ADMIN = frozenset({OPERATOR, ADMIN})
@@ -132,6 +133,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     "find-unmanaged-traffic":     ToolSpec(handle_find_unmanaged_traffic,   roles=ALL_ROLES, unscopable=True),
     # Policy reports (PCE-wide; not safely scopable)
     "compliance-check":           ToolSpec(handle_compliance_check,         roles=ALL_ROLES, unscopable=True),
+    "collect-compliance-evidence": ToolSpec(handle_collect_compliance_evidence, roles=ALL_ROLES, unscopable=True),
     "enforcement-readiness":      ToolSpec(handle_enforcement_readiness,    roles=ALL_ROLES, unscopable=True),
     "get-policy-coverage-report": ToolSpec(handle_get_policy_coverage_report,roles=ALL_ROLES, unscopable=True),
     "compare-draft-active":       ToolSpec(handle_compare_draft_active,     roles=ALL_ROLES, unscopable=True),

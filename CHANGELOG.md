@@ -22,6 +22,67 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`collect-compliance-evidence`** (#54) -- audit evidence for segmentation
+  controls, per app/env scope pair, from **active** policy and observed
+  traffic. Runs the framework-independent tests of the
+  illumio-compliance-evidence skill server-side and returns, per test and per
+  pair, `{result: PASS|FAIL|EXCEPTION|NOT_TESTED, measured, rows, evidence}`:
+  - T1 inventory (one workload pull per pair, both labels in one AND block),
+    T2 100% full enforcement, T3 VEN health (active, heartbeat under 24h,
+    synced or applied, no health errors), T4 unmanaged in scope.
+  - T5 providing rules described, T6 no broad consumer (all-workloads with
+    `unscoped_consumers` or in an unscoped ruleset; an IP list named or ranged
+    0.0.0.0/0 or ::/0), T7 admitted services with port ranges and **service
+    objects expanded to ports** from the services list, cleartext ports
+    flagged, compared to `approved_services` when given.
+  - T8 inbound crossings with intra-scope rows dropped, zero potentially
+    blocked, blocked rows and connections, a per-day timeline with the spike
+    rule; T9 outbound crossings, public destinations first; T11 pending draft
+    changes filtered to the pair's rulesets; T14 events and flows in window.
+  - `scope: [{app, env}]` resolved to hrefs, `pversion` (default active, echoed
+    as `policy_version`), `lookback_days` or `start_date`/`end_date`,
+    `approved_services: [{port, proto, direction, justification}]`, `tests`
+    subset, `max_results`, `max_rows`. Output carries `overall` (worst of FAIL,
+    EXCEPTION, NOT_TESTED, PASS), `queries`, `window`, `scope` with workload
+    counts, and `not_run` for T10, T12, T13 with the reason. No framework
+    mapping; that stays in the `illumio://compliance/*` resources.
+  - A capped pull never yields PASS: a clean capped result is EXCEPTION, a
+    violation in one is FAIL. An unknown scope label is an error.
+- **`nis2`** in `compliance-check`'s framework enum and the
+  `illumio://compliance/nis2` resource: Directive (EU) 2022/2555 Art 21(2)
+  and Implementing Regulation (EU) 2024/2690 Annex 3.2, 6.7, 6.8, 11 and 12.4
+  mapped to the evidence the tools produce.
+- `raw_flows_to_dataframe` takes an optional `label_map` so a tool issuing
+  several queries per call reads the label list once.
+
+### Fixed
+
+- **`compliance-check` no longer runs estate-wide on an unknown `app_name` or
+  `env_name`.** It used to drop the label silently and report the whole
+  estate as the app's result; it now returns `unresolved_label_filter` with
+  the valid values. The match is exact, where the PCE matches `?value=` as a
+  substring.
+- The `_label_filter` docstring in policy.py said `[[a], [b]]` was the AND
+  encoding, contradicting `label_refs.encode_label_filter` (and the code,
+  which always produced `[[a, b]]`). The later live measurement in
+  tests/test_label_filters.py is the ground truth: `[[a, b]]` is the
+  intersection (23 hosts), `[[a], [b]]` the union (138). Docstring and code
+  now agree; `_label_filter` delegates to `encode_label_filter`.
+
+### Unlearn
+
+- **`compliance-check` is a first look; evidence comes from
+  `collect-compliance-evidence`**, which reads active policy and returns
+  per-test results, not a score. Do not cite a `compliance_score` to an
+  auditor.
+- **`compliance-check` with a misspelt app or env now errors** instead of
+  answering for the whole estate. A session that treated "0 findings" from a
+  typo as a clean result was reading the wrong scope.
+
 ## [0.12.0] — 2026-10-16
 
 ### Added

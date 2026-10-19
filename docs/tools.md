@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 53 tools, grouped by area. Generated from the server's own registry by
+All 54 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -103,8 +103,9 @@ which other apps communicate with this... |
 
 | Tool | Access | Type | Description |
 |---|---|---|---|
+| `collect-compliance-evidence` | reader | *read* | Audit evidence for segmentation controls, per app/env scope pair, from ACTIVE policy (pversion=active by default) and observed... |
 | `compare-draft-active` | reader | *read* | Compare draft vs active policy to see what would change on provisioning. Shows new, modified, and deleted rulesets, rules, IP l... |
-| `compliance-check` | reader | *read* | Check policy compliance against common frameworks (PCI-DSS, NIST, CIS). Identifies workloads in specific compliance scopes and... |
+| `compliance-check` | reader | *read* | First look at policy posture against a framework (PCI-DSS, DORA, NIS2, NIST, CIS, ISO 27001, SWIFT CSP, HIPAA): keyword-routed... |
 | `enforcement-readiness` | reader | *read* | Assess whether an application is ready for enforcement by analyzing its traffic flows, existing policy coverage, and identifyin... |
 | `get-policy-coverage-report` | reader | *read* | Generate a policy coverage report for an app, showing what traffic is covered by existing rules vs what would be blocked. Helps... |
 | `provision-policy` | admin | **confirm** | Provision pending draft policy changes in the PCE. This moves draft rulesets, rules, IP lists, services, and label groups from... |
