@@ -35,6 +35,21 @@ class _PolicyNames:
         info = self._cache["label"].get(href) or {}
         return {"key": info.get("key"), "value": info.get("value"), "href": href}
 
+    def user(self, href: str) -> dict:
+        """created_by/updated_by on policy objects is {href: /users/N} only;
+        the username comes from GET /users (root-level, org-owner only), so
+        it is best effort and None when this key may not list users."""
+        if "user" not in self._cache:
+            users = {}
+            try:
+                for u in self.pce.get("/users", include_org=False).json() or []:
+                    if isinstance(u, dict) and u.get("href"):
+                        users[u["href"]] = u.get("username") or u.get("full_name")
+            except Exception as exc:                         # names are a nicety
+                logger.debug("could not list users for names: %s", exc)
+            self._cache["user"] = users
+        return {"username": self._cache["user"].get(href), "href": href}
+
     def name(self, kind: str, href: str) -> dict:
         if kind not in self._cache:
             api = {"ip_list": "ip_lists", "label_group": "label_groups",
@@ -109,6 +124,22 @@ def _render_service(svc, names: _PolicyNames) -> dict:
     return out or {"raw": svc}
 
 
+def _audit_fields(obj: dict, names: _PolicyNames) -> dict:
+    """created_at / updated_at / update_type / created_by / updated_by, only
+    the ones the PCE sent. Actors become {username, href}; a dict that already
+    carries a username (some PCE builds) is used as is."""
+    out = {}
+    for key in ("created_at", "updated_at", "update_type"):
+        if obj.get(key) is not None:
+            out[key] = obj[key]
+    for key in ("created_by", "updated_by"):
+        actor = obj.get(key)
+        if isinstance(actor, dict) and actor.get("href"):
+            out[key] = ({"username": actor["username"], "href": actor["href"]}
+                        if actor.get("username") else names.user(actor["href"]))
+    return out
+
+
 def _render_rule(rule: dict, rule_type: str, names: _PolicyNames) -> dict:
     out = {
         "rule_type": rule_type,
@@ -123,6 +154,7 @@ def _render_rule(rule: dict, rule_type: str, names: _PolicyNames) -> dict:
         out["resolve_labels_as"] = rule.get("resolve_labels_as")
         if rule.get("unscoped_consumers"):
             out["unscoped_consumers"] = True
+    out.update(_audit_fields(rule, names))
     return out
 
 
@@ -224,6 +256,7 @@ def handle_get_rulesets(ctx, arguments: dict) -> list:
                 'scopes': [[_render_scope_entry(a, names) for a in scope]
                            for scope in rs.get('scopes') or []],
                 'rules': rules,
+                **_audit_fields(rs, names),
             })
 
         payload = {

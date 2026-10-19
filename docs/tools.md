@@ -53,7 +53,7 @@ HTTP mode; in stdio mode every caller is `admin`.
 |---|---|---|---|
 | `create-iplist` | operator | **write** | Create a new IP List in the PCE |
 | `delete-iplist` | operator | **write** | Delete an IP List from the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List. |
-| `get-iplists` | reader | *read* | Get IP lists from the PCE with optional filtering |
+| `get-iplists` | reader | *read* | Get IP lists from the PCE with optional filtering. Each list carries ip_ranges as [{from_ip, to_ip, exclusion, description}] an... |
 | `update-iplist` | operator | **write** | Update an existing IP List in the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List. |
 
 ## Services
@@ -85,6 +85,7 @@ Builds an app-to-app communication graph and com... |
 
 | Tool | Access | Type | Description |
 |---|---|---|---|
+| `find-unknown-endpoints` | reader | *read* | Which IP addresses show up in traffic that the PCE does not know as a workload at all, and what do they do. Unknown = Explorer... |
 | `find-unmanaged-traffic` | reader | *read* | Find traffic involving unmanaged (unlabeled) workloads or IP addresses. These are sources or destinations without app/env label... |
 | `get-traffic-flows` | reader | *read* | Get traffic flows from the PCE with comprehensive filtering options |
 | `get-traffic-flows-summary` | reader | *read* | Summarize traffic flows as structured JSON. Sections: by_process (which binary talks to which destination, on which port, under... |
@@ -123,7 +124,7 @@ which other apps communicate with this... |
 | `check-pce-connection` | reader | *read* | Is the PCE answering, and how fast. Probes GET /health first and returns JSON: status (ok \| unreachable), health_http_status,... |
 | `check-pce-credentials-status` | reader | *read* | Check which PCE credentials apply to the current user without revealing secrets. Always carries `mode`: per_user (your own key)... |
 | `delete-pce-credentials` | reader | **write** | Remove the current user's stored PCE credentials. Idempotent — safe to call even if no credentials are stored. |
-| `get-events` | reader | *read* | Get events from the PCE with optional filtering |
+| `get-events` | reader | *read* | PCE audit events as data. Each event carries created_by as {type: user\|agent\|system, username, href}, resource_changes as [{r... |
 | `get-pairing-profiles` | reader | *read* | Get pairing profiles from the PCE. Pairing profiles define the initial enforcement mode and labels for VENs when they pair with... |
 | `get-pce-capacity` | reader | *read* | How full is this PCE, against its limits. Reads the documented metrics -- flow storage and retention per source vs limits (traf... |
 | `register-pce-credentials` | operator | **write** | Register (or overwrite) PCE credentials for the current authenticated user. After registering, all PCE tools become available i... |

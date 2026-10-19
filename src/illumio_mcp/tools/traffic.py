@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 import mcp.types as types
 from illumio import TrafficQuery
+from illumio.util import FQDN_REGEX, Transmission
 
 from ..pce import run_sync
 from ..log_scrub import ScrubbedArgs
@@ -258,75 +259,148 @@ def _label_lookup(pce) -> dict:
     }
 
 
-def _resolve_filter_block(block, lookup: dict, unresolved: list):
-    """Resolve "key=value" label filters to hrefs, recursively.
+_TRANSMISSIONS = frozenset(t.value for t in Transmission)
 
-    The Explorer API only accepts label HREFs, IP-list HREFs, workload HREFs,
-    IPs or FQDNs. Passing "app=vdi" through verbatim makes the PCE reject the
-    whole query with "Invalid traffic filter type", which forced callers to run
-    get-labels first and paste an href. Resolving here makes the documented
-    shorthand actually work and keeps it to one tool call.
 
-    Anything that is not a bare "key=value" string is passed through untouched,
-    so hrefs, IPs, FQDNs and already-structured dicts keep working.
+def _is_ip_address(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _resolve_filter_block(block, lookup: dict, unresolved: list,
+                          *, source: bool = False, rejected: list | None = None):
+    """Turn every string filter form into the dict the Explorer API wants.
+
+    Explorer accepts label, IP-list and workload HREFs, IPs, FQDNs and
+    transmission types. The SDK parses those strings itself, but only at the
+    TOP level of the include list; _normalise_filter nests every entry inside
+    an AND-block, where the SDK appends the raw string untouched and then
+    fails validation with "Invalid value for include: [['10.0.0.5']]". Label
+    shorthand was converted here for the same reason; every other form fell
+    through "untouched" and therefore broke (#47). So resolve all of them.
+
+    "key=value" label shorthand goes through `lookup`; anything that matches
+    nothing is appended to `unresolved`. FQDN and transmission filters are
+    destination-only -- the PCE rejects them on the consumer side -- so when
+    `source` is set they are appended to `rejected` instead of converted.
+    Dicts and unknown strings pass through untouched.
     """
     if isinstance(block, list):
-        return [_resolve_filter_block(item, lookup, unresolved) for item in block]
-    if isinstance(block, str) and block.startswith("/orgs/") and "/labels/" in block:
-        # A bare label HREF. Left as a raw string it reaches TrafficQuery.build
-        # nested inside a list, where the SDK's _parse_traffic_filters skips it
-        # (not a str at the top level) and validation fails with
-        # "Invalid value for include".
-        return {"label": {"href": block}}
-    if isinstance(block, str) and "=" in block and not block.startswith("/"):
-        href = lookup.get(block.strip())
+        return [_resolve_filter_block(item, lookup, unresolved,
+                                      source=source, rejected=rejected)
+                for item in block]
+    if not isinstance(block, str):
+        return block
+    text = block.strip()
+    if text.startswith("/"):
+        # Bare HREFs. Left as raw strings they reach TrafficQuery.build nested
+        # inside a list, where the SDK's _parse_traffic_filters skips them.
+        if "/labels/" in text:
+            return {"label": {"href": text}}
+        if "/ip_lists/" in text:
+            return {"ip_list": {"href": text}}
+        if "/workloads/" in text:
+            return {"workload": {"href": text}}
+        return block
+    if "=" in text:
+        href = lookup.get(text)
         if href:
             return {"label": {"href": href}}
         unresolved.append(block)
         return block
-    return block
+    if _is_ip_address(text):
+        return {"ip_address": text}
+    if text.lower() in _TRANSMISSIONS:
+        form = {"transmission": text.lower()}
+    elif FQDN_REGEX.match(text):
+        form = {"fqdn": text}
+    else:
+        return block
+    if source:
+        if rejected is not None:
+            rejected.append(block)
+        return block
+    return form
 
 
-def _resolve_label_filters(pce, arguments: dict) -> list:
-    """Resolve label shorthand in every filter argument. Returns unresolved keys."""
+class FilterProblems:
+    """What stopped a traffic query from being sent, found while resolving.
+
+    `unresolved`: "key=value" shorthand that matched no label.
+    `source_only`: FQDN or transmission filters given on the source side,
+    which the PCE rejects. Truthy when there is anything to report.
+    """
+
+    def __init__(self):
+        self.unresolved: list = []
+        self.source_only: list = []
+
+    def __bool__(self):
+        return bool(self.unresolved or self.source_only)
+
+
+def _resolve_label_filters(pce, arguments: dict) -> FilterProblems:
+    """Resolve every string form in every filter argument, in place.
+
+    Returns the problems that mean the query must not be sent; pass them to
+    _unresolved_error for the structured response.
+    """
+    problems = FilterProblems()
     filter_args = ("include_sources", "exclude_sources",
                    "include_destinations", "exclude_destinations")
     if not any(arguments.get(a) for a in filter_args):
-        return []
+        return problems
 
-    # Bare HREFs need converting too, and they contain no "=", so this cannot
-    # short-circuit on shorthand alone -- that is why /orgs/.../labels/... kept
-    # reaching TrafficQuery.build as a raw string.
+    # Bare HREFs and IPs need converting too, and they contain no "=", so this
+    # cannot short-circuit on shorthand alone -- that is why
+    # /orgs/.../labels/... kept reaching TrafficQuery.build as a raw string.
     needs_lookup = any(
         "=" in str(arguments.get(a, "")) for a in filter_args
     )
 
-    unresolved: list = []
     lookup = {}
     if needs_lookup:
         try:
             lookup = _label_lookup(pce)
         except Exception:
             logger.exception("Could not load labels to resolve filter shorthand")
-            return []
+            return problems
     for arg in filter_args:
         if arguments.get(arg):
-            arguments[arg] = _resolve_filter_block(arguments[arg], lookup, unresolved)
-    return unresolved
+            arguments[arg] = _resolve_filter_block(
+                arguments[arg], lookup, problems.unresolved,
+                source=arg.endswith("_sources"), rejected=problems.source_only)
+    return problems
 
 
-def _unresolved_error(unresolved: list, pce) -> dict | None:
-    """Fail fast on a label filter that matched nothing.
+def _unresolved_error(problems: FilterProblems, pce) -> dict | None:
+    """Fail fast on a filter the PCE would reject or that matched nothing.
 
     Forwarding an unresolved "key=value" to the Explorer API makes the PCE
     reject the whole query with "Invalid traffic filter type", which tells the
     caller nothing about which filter was wrong. Naming it here, with the valid
-    values for that key, turns a dead end into a correctable mistake.
+    values for that key, turns a dead end into a correctable mistake. The same
+    goes for an FQDN or transmission filter on the source side: the PCE only
+    accepts those on destinations, so say which filter and where it belongs.
     """
-    if not unresolved:
+    if not problems:
         return None
+    if problems.source_only:
+        return {
+            "error": "unsupported_source_filter",
+            "message": ("Explorer cannot filter SOURCES by FQDN or transmission "
+                        "type (broadcast/multicast/unicast); the PCE rejects a "
+                        "consumer-side filter of that kind, so the query was not "
+                        "sent. Move these to include_destinations / "
+                        "exclude_destinations, or filter sources by IP, IP-list "
+                        "HREF, workload HREF or label."),
+            "unsupported": problems.source_only,
+        }
     hints = {}
-    for item in unresolved:
+    for item in problems.unresolved:
         key = str(item).split("=", 1)[0].strip()
         try:
             values = sorted({l.value for l in pce.labels.get(
@@ -338,7 +412,7 @@ def _unresolved_error(unresolved: list, pce) -> dict | None:
         "error": "unresolved_label_filter",
         "message": ("These filters matched no label in the PCE, so the query was "
                     "not sent. Use key=value with an existing value."),
-        "unresolved": unresolved,
+        "unresolved": problems.unresolved,
         "valid_values": hints,
     }
 
