@@ -22,6 +22,53 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`find-unknown-endpoints`** (#48) -- which IP addresses show up in traffic
+  that the PCE does not know as a workload at all, and what they do. Unknown
+  means Explorer attached no workload to that side of the flow **and** the IP
+  is not an interface address of any inventoried workload, managed or
+  unmanaged. One Explorer pull over the window (allowed, potentially blocked,
+  blocked), one workload inventory pull, one draft IP-list pull, each with its
+  own truncation flag.
+  - Per endpoint: `fqdn`, `address_class` (private, public, link_local,
+    multicast, broadcast, loopback), `ip_lists` (named lists containing it,
+    exclusions honoured, the `0.0.0.0/0` default list dropped),
+    `likely_provider` for public addresses, `neighbourhood` (the /24 or /64
+    shared with N managed workloads), `as_source` / `as_destination` blocks
+    (connections, flows, peer workloads, peer apps as `app (env)`, top-10
+    ports with an `admin` flag, policy mix, first/last seen,
+    `allowed_into_enforced`), `peers_enforced`, and `profile` shapes with
+    their evidence: `scanner`, `fan_in_server`, `admin_reach`, `high_volume`,
+    `single_peer`. Thresholds match the illumio-unknown-endpoints skill's
+    rubric.
+  - `ip` profiles one address: Explorer is filtered to it server-side (one
+    query per direction), the peer x port table is complete, and a `timeline`
+    reuses the timeline tool's bucketing and spike rule (1h up to two days,
+    else 1d). An inventoried address is answered as `known` without a query.
+  - Noise classes are counted in `totals.noise_endpoints` and listed only with
+    `include_noise`. Unlabelled workloads are counted, not profiled.
+  - Not verified against a live PCE yet; the fixture estate in
+    `tests/test_unknown_endpoints.py` is the contract.
+
+### Unlearn
+
+- **`find-unmanaged-traffic` means unlabelled, not unknown.** Its test is "no
+  `app` label", so it lists an unlabelled VEN and drops a labelled unmanaged
+  workload, and it carries no policy decision, FQDN, IP-list name or
+  truncation flag. Use `find-unknown-endpoints` for addresses the PCE does not
+  know; filter `find-unmanaged-traffic` against the inventory if you still use
+  it for that.
+- **An IP-list match is not an inventory entry.** `get-traffic-flows-summary`
+  labels an external destination by its IP-list name, so on a PCE where the
+  default list matches, every unknown destination collapses into one row
+  named `Any (0.0.0.0/0 and ::/0)`. `find-unknown-endpoints` keeps `ip` as its
+  own field and never cites the default list as coverage.
+
+---
+
 ## [0.12.0] — 2026-10-16
 
 ### Added
