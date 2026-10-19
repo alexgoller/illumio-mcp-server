@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 54 tools, grouped by area. Generated from the server's own registry by
+All 55 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
