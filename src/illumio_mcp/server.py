@@ -2357,12 +2357,12 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to include. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), which the server resolves to a label HREF, as well as label/IP list/workload HREFs, FQDNs and IPs. Omit to match all sources."
+                        "description": "Sources to include. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), which the server resolves to a label HREF, as well as label/IP list/workload HREFs and IPs. FQDNs and broadcast/multicast/unicast are destination-only (the PCE rejects them on sources). Omit to match all sources."
                     },
                     "exclude_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to exclude (label/IP list/workload HREFs, FQDNs, IPs)"
+                        "description": "Sources to exclude (label/IP list/workload HREFs, IPs; FQDNs are destination-only)"
                     },
                     "include_destinations": {
                         "type": "array",
@@ -2437,7 +2437,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Restrict to these sources. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), HREFs, IPs or FQDNs."
+                        "description": "Restrict to these sources. Accepts label shorthand 'key=value' (e.g. 'app=vdi'), label/IP list/workload HREFs or IPs (FQDNs are destination-only)."
                     },
                     "only_named_processes": {
                         "type": "boolean",
@@ -2485,8 +2485,8 @@ async def handle_list_tools() -> list[types.Tool]:
                         "type": "boolean",
                         "description": "Include the identity -> workload -> destination edges. Capped at 400, ranked by connections; the identity rollup answers most questions without them."
                     },
-                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Label filters, e.g. ['app=vdi']"},
-                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Label filters on the destination side"},
+                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Source filters: label HREFs or key=value (ANDed), IP list/workload HREFs, IPs, e.g. ['app=vdi']"},
+                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destination filters, same forms as include_sources plus FQDNs"},
                     "policy_decisions": {"type": "array", "items": {"type": "string"}, "description": "allowed, blocked, potentially_blocked"},
                     "top": {"type": "integer", "description": "Destinations/ports/processes listed per identity (default 10)"},
                 },
@@ -2503,12 +2503,12 @@ async def handle_list_tools() -> list[types.Tool]:
                     "include_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to include (label/IP list/workload HREFs, FQDNs, IPs). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
+                        "description": "Sources to include (label/IP list/workload HREFs, IPs; FQDNs are destination-only). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
                     },
                     "exclude_sources": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Sources to exclude (label/IP list/workload HREFs, FQDNs, IPs). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
+                        "description": "Sources to exclude (label/IP list/workload HREFs, IPs; FQDNs are destination-only). Best case these are hrefs like /orgs/1/labels/57 or similar. Other way is app=env as an example (label key and value)"
                     },
                     "include_destinations": {
                         "type": "array",
@@ -2585,9 +2585,9 @@ async def handle_list_tools() -> list[types.Tool]:
                     "bucket": {"type": "string", "enum": ["15m", "1h", "6h", "1d"], "description": "Bucket size (default 1h). Buckets align to the wall clock, not the window start. Max 2000 buckets."},
                     "split_by": {"type": "string", "enum": ["policy_decision", "direction"], "description": "Add a per-bucket breakdown: by_policy_decision or by_flow_direction"},
                     "spikes": {"type": "boolean", "description": "Add `spikes`: median of non-zero buckets, threshold (3x), the buckets above it and the worst one"},
-                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to include: label HREFs or key=value (entries are ANDed), IP list/workload HREFs, FQDNs, IPs"},
+                    "include_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to include: label HREFs or key=value (entries are ANDed), IP list/workload HREFs, IPs. FQDNs are destination-only"},
                     "exclude_sources": {"type": "array", "items": {"type": "string"}, "description": "Sources to exclude"},
-                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to include, same forms as include_sources"},
+                    "include_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to include, same forms as include_sources plus FQDNs and broadcast/multicast/unicast"},
                     "exclude_destinations": {"type": "array", "items": {"type": "string"}, "description": "Destinations to exclude"},
                     "include_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}},
                     "exclude_services": {"type": "array", "items": {"type": "object", "properties": {"port": {"type": "integer"}, "proto": {"type": "string"}}}},
