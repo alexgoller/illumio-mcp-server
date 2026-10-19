@@ -24,6 +24,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`get-iplists` answers as data** (#49). `ip_ranges` is
+  `[{from_ip, to_ip, exclusion, description}]` and `fqdns` is
+  `[{fqdn, description}]`, the same move #45 made for rulesets.
+  - `pversion: draft | active` (default draft), echoed as `policy_version`
+    in the envelope, which keeps `ip_lists` and `total_count`.
+  - `contains_ip: "10.20.30.40"` returns only the lists whose ranges contain
+    that address, evaluated server-side with `ipaddress`: a `from_ip` may be
+    a CIDR, a single address, or the start of a span to `to_ip`; exclusion
+    ranges carve addresses back out; IPv4 and IPv6 never cross. Each
+    returned list carries `matched_range`, and the argument is echoed as
+    `contains_ip`. The existing `ip_address` filter is unchanged and is the
+    PCE's substring match on the range text, which matches `10.20.30.4`
+    against `10.20.30.40/32` and never looks inside a CIDR.
+  - `is_default: true` on any list with an inclusion range equal to
+    `0.0.0.0/0` or `::/0`, so a caller deciding whether an address is
+    "covered by an IP list" can drop the built-in Any list.
+
 ### Fixed
 
 - **Traffic include filters accept IPs, IP-list/workload HREFs, FQDNs and
@@ -54,6 +73,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`include_sources` never accepted FQDNs or broadcast/multicast/unicast**,
   whatever the old description said; the PCE rejects them on the consumer
   side. Put them in `include_destinations` / `exclude_destinations`.
+
+- **`ip_ranges` are objects now, not `IPRange(...)` text; a session that
+  regexed `from_ip=` out of reprs can stop.** Same for `fqdns`, which were
+  `FQDN(...)` strings. `get-iplists` also reads draft unless told
+  `pversion: active`, and says which in `policy_version`; before, the
+  version was implicit.
 
 ## [0.12.0] — 2026-10-16
 

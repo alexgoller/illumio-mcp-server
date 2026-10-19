@@ -53,7 +53,7 @@ HTTP mode; in stdio mode every caller is `admin`.
 |---|---|---|---|
 | `create-iplist` | operator | **write** | Create a new IP List in the PCE |
 | `delete-iplist` | operator | **write** | Delete an IP List from the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List. |
-| `get-iplists` | reader | *read* | Get IP lists from the PCE with optional filtering |
+| `get-iplists` | reader | *read* | Get IP lists from the PCE with optional filtering. Each list carries ip_ranges as [{from_ip, to_ip, exclusion, description}] an... |
 | `update-iplist` | operator | **write** | Update an existing IP List in the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List. |
 
 ## Services

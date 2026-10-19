@@ -1,5 +1,6 @@
 import json
 import logging
+from ipaddress import ip_address, ip_network
 import mcp.types as types
 from ..log_scrub import ScrubbedArgs
 from ..errors import describe_error
@@ -7,35 +8,123 @@ from ..errors import describe_error
 logger = logging.getLogger('illumio_mcp')
 
 
+POLICY_VERSIONS = ("draft", "active")
+_DEFAULT_NETS = {ip_network("0.0.0.0/0"), ip_network("::/0")}
+
+
+def _range_dict(r) -> dict:
+    """One IPRange as plain data. The SDK repr was the previous shape, and a
+    caller who wants to know whether an address is covered had to regex
+    `from_ip=` out of it."""
+    return {
+        "from_ip": getattr(r, "from_ip", None),
+        "to_ip": getattr(r, "to_ip", None),
+        "exclusion": bool(getattr(r, "exclusion", False)),
+        "description": getattr(r, "description", None),
+    }
+
+
+def _fqdn_dict(f) -> dict:
+    return {"fqdn": getattr(f, "fqdn", None), "description": getattr(f, "description", None)}
+
+
+def _range_contains(addr, rng: dict) -> bool:
+    """`from_ip` is a CIDR, a single address, or -- when `to_ip` is set -- the
+    start of an inclusive span. A range the PCE accepted but ipaddress does
+    not parse, or one of the other IP version, does not contain anything."""
+    try:
+        if rng.get("to_ip"):
+            lo, hi = ip_address(rng["from_ip"]), ip_address(rng["to_ip"])
+            return lo.version == addr.version and lo <= addr <= hi
+        net = ip_network(rng["from_ip"], strict=False)
+        return net.version == addr.version and addr in net
+    except (ValueError, TypeError):
+        return False
+
+
+def _matched_range(addr, ranges: list[dict]) -> dict | None:
+    """The inclusion range that covers `addr`, or None when no range does or
+    an exclusion range carves it back out. Exclusions win regardless of
+    order, which is how the PCE evaluates them."""
+    if any(r["exclusion"] and _range_contains(addr, r) for r in ranges):
+        return None
+    return next((r for r in ranges if not r["exclusion"] and _range_contains(addr, r)), None)
+
+
+def _is_default(ranges: list[dict]) -> bool:
+    """True for a list carrying 0.0.0.0/0 or ::/0 as an inclusion -- the
+    built-in "Any" list, which covers every address and so says nothing
+    about whether an address is "in an IP list"."""
+    for r in ranges:
+        if r["exclusion"] or r.get("to_ip"):
+            continue
+        try:
+            if ip_network(r["from_ip"], strict=False) in _DEFAULT_NETS:
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
 def handle_get_iplists(ctx, arguments: dict) -> list:
     logger.debug("GET IP LISTS CALLED with arguments: %s", ScrubbedArgs(arguments))
     try:
         pce = ctx.pce
+
+        pversion = str(arguments.get('pversion') or 'draft').lower()
+        if pversion not in POLICY_VERSIONS:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": f"pversion must be 'draft' or 'active', got {pversion!r}"}))]
+
+        # Exact containment, evaluated here. The PCE's `ip_address` filter is
+        # a substring match on the range text: it matches 10.20.30.4 against
+        # 10.20.30.40/32 and never matches an address inside a CIDR.
+        contains = None
+        if arguments.get('contains_ip'):
+            try:
+                contains = ip_address(str(arguments['contains_ip']).strip())
+            except ValueError:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "error": f"contains_ip must be a single IPv4 or IPv6 address, "
+                             f"got {arguments['contains_ip']!r}"}))]
 
         params = {"max_results": arguments.get("max_results", 10000)}
         for param in ['name', 'description', 'fqdn', 'ip_address']:
             if arguments.get(param):
                 params[param] = arguments[param]
 
-        ip_lists = pce.ip_lists.get(params=params)
+        ip_lists = pce.ip_lists.get(policy_version=pversion, params=params)
 
         iplist_data = []
         for iplist in ip_lists:
+            ranges = [_range_dict(r) for r in (getattr(iplist, 'ip_ranges', None) or [])]
+            matched = None
+            if contains is not None:
+                matched = _matched_range(contains, ranges)
+                if matched is None:
+                    continue
             iplist_dict = {
                 'href': iplist.href,
                 'name': iplist.name,
                 'description': iplist.description,
-                'ip_ranges': [str(ip_range) for ip_range in iplist.ip_ranges] if iplist.ip_ranges else [],
-                'fqdns': [str(fqdn) for fqdn in iplist.fqdns] if hasattr(iplist, 'fqdns') and iplist.fqdns else [],
+                'is_default': _is_default(ranges),
+                'ip_ranges': ranges,
+                'fqdns': [_fqdn_dict(f) for f in (getattr(iplist, 'fqdns', None) or [])],
                 'created_at': str(iplist.created_at) if hasattr(iplist, 'created_at') else None,
                 'updated_at': str(iplist.updated_at) if hasattr(iplist, 'updated_at') else None,
             }
+            if matched is not None:
+                iplist_dict['matched_range'] = matched
             iplist_data.append(iplist_dict)
 
-        return [types.TextContent(
-            type="text",
-            text=json.dumps({"ip_lists": iplist_data, "total_count": len(iplist_data)}, indent=2)
-        )]
+        payload = {
+            "policy_version": pversion,
+            "ip_lists": iplist_data,
+            "total_count": len(iplist_data),
+        }
+        if contains is not None:
+            payload["contains_ip"] = str(contains)
+        return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
     except Exception as e:
         error_msg = f"Failed to get IP lists: {describe_error(e)}"
         logger.error(error_msg, exc_info=True)
