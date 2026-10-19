@@ -53,6 +53,41 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Not verified against a live PCE yet; the fixture estate in
     `tests/test_unknown_endpoints.py` is the contract.
 
+- **`get-iplists` answers as data** (#49). `ip_ranges` is
+  `[{from_ip, to_ip, exclusion, description}]` and `fqdns` is
+  `[{fqdn, description}]`, the same move #45 made for rulesets.
+  - `pversion: draft | active` (default draft), echoed as `policy_version`
+    in the envelope, which keeps `ip_lists` and `total_count`.
+  - `contains_ip: "10.20.30.40"` returns only the lists whose ranges contain
+    that address, evaluated server-side with `ipaddress`: a `from_ip` may be
+    a CIDR, a single address, or the start of a span to `to_ip`; exclusion
+    ranges carve addresses back out; IPv4 and IPv6 never cross. Each
+    returned list carries `matched_range`, and the argument is echoed as
+    `contains_ip`. The existing `ip_address` filter is unchanged and is the
+    PCE's substring match on the range text, which matches `10.20.30.4`
+    against `10.20.30.40/32` and never looks inside a CIDR.
+  - `is_default: true` on any list with an inclusion range equal to
+    `0.0.0.0/0` or `::/0`, so a caller deciding whether an address is
+    "covered by an IP list" can drop the built-in Any list.
+
+### Fixed
+
+- **Traffic include filters accept IPs, IP-list/workload HREFs, FQDNs and
+  transmission types** (#47). `include_sources` / `include_destinations` on
+  `get-traffic-flows`, `get-traffic-flows-summary`, `get-traffic-timeline`,
+  `discover-process-egress` and `build-identity-graph` documented those forms
+  but only labels worked: the server nests entries into one AND-block, and the
+  SDK parses filter strings only at the top level, so `["10.0.0.5"]` reached
+  validation raw and failed with `Invalid value for include: [['10.0.0.5']]`.
+  Every form is now resolved before nesting, the way labels already were:
+  IPv4/IPv6 -> `ip_address`, `/ip_lists/` HREF -> `ip_list`, `/workloads/`
+  HREF -> `workload`, FQDN -> `fqdn`, broadcast/multicast/unicast ->
+  `transmission`. `exclude_*` keeps its flat shape.
+- **An FQDN or transmission filter on the source side is a structured error**
+  (`unsupported_source_filter`), not a PCE rejection of the whole query. The
+  Explorer API only accepts those on destinations; the response names the
+  offending filters and where they belong.
+
 ### Unlearn
 
 - **`find-unmanaged-traffic` means unlabelled, not unknown.** Its test is "no
@@ -68,6 +103,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   own field and never cites the default list as coverage.
 
 ---
+
+- **IP, FQDN and IP-list HREF strings in `include_*` now work; the object
+  form is no longer needed.** `include_sources: ["10.20.30.40"]` and
+  `include_sources: ["/orgs/1/sec_policy/draft/ip_lists/1"]` (with the
+  default `exclude_workloads_from_ip_list_query: true`, the "endpoints that
+  are not workloads" idiom) are the documented way. A session that learned to
+  pass `{"ip_list": {"href": ...}}` dicts, or to give up on IP filters, can
+  stop.
+- **`include_sources` never accepted FQDNs or broadcast/multicast/unicast**,
+  whatever the old description said; the PCE rejects them on the consumer
+  side. Put them in `include_destinations` / `exclude_destinations`.
+
+- **`ip_ranges` are objects now, not `IPRange(...)` text; a session that
+  regexed `from_ip=` out of reprs can stop.** Same for `fqdns`, which were
+  `FQDN(...)` strings. `get-iplists` also reads draft unless told
+  `pversion: active`, and says which in `policy_version`; before, the
+  version was implicit.
 
 ## [0.12.0] — 2026-10-16
 
