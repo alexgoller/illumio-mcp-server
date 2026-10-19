@@ -341,7 +341,7 @@ without an interactive session model. Requires the IdP to issue `auth_time`
 - `delete-deny-rule` — Remove a deny rule
 
 ### IP List Management
-- `get-iplists` — Get IP lists with optional filtering by name, description, FQDN, and max results
+- `get-iplists` — Get IP lists with structured `ip_ranges` and `fqdns`, `pversion` draft|active, `is_default` on the Any list, and `contains_ip` for an exact server-side "which lists cover this address" lookup
 - `create-iplist` — Create a new IP list
 - `update-iplist` — Update an existing IP list
 - `delete-iplist` — Remove an IP list
