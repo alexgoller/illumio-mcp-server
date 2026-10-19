@@ -2659,14 +2659,24 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get-iplists",
-            description="Get IP lists from the PCE with optional filtering",
+            description=(
+                "Get IP lists from the PCE with optional filtering. Each list carries "
+                "ip_ranges as [{from_ip, to_ip, exclusion, description}] and fqdns as "
+                "[{fqdn, description}], plus is_default: true on the built-in list that "
+                "covers 0.0.0.0/0 or ::/0. Use contains_ip for an exact 'which lists "
+                "cover this address' answer, evaluated server-side (CIDRs, from/to "
+                "spans, exclusions, IPv4 and IPv6); the ip_address filter is the PCE's "
+                "substring match on the range text and does not look inside CIDRs."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Filter IP lists by name (supports partial matches)"},
                     "description": {"type": "string", "description": "Filter by description (supports partial matches)"},
                     "fqdn": {"type": "string", "description": "Filter by FQDN (supports partial matches)"},
-                    "ip_address": {"type": "string", "description": "Filter by IP address (supports partial matches)"},
+                    "ip_address": {"type": "string", "description": "PCE-side substring match on the range text (e.g. '10.20.30.4' matches '10.20.30.40/32' and never matches an address inside a CIDR). Use contains_ip for exact containment."},
+                    "contains_ip": {"type": "string", "description": "A single IPv4 or IPv6 address. Return only the IP lists whose ranges contain it, honouring exclusion ranges; each returned list carries matched_range. Combine with is_default to tell 'in a real list' from 'only in Any'."},
+                    "pversion": {"type": "string", "enum": ["draft", "active"], "description": "Policy version to read (default draft). Echoed as policy_version in the response."},
                     "max_results": {"type": "integer", "description": "Maximum number of IP lists to return"},
                 }
             }
