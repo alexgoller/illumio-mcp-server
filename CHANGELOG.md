@@ -224,8 +224,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `pversion: active`, and says which in `policy_version`; before, the
   version was implicit.
 
-## [0.12.1] — 2026-10-30
-
 ### Security
 
 - **certifi >= 2026.10.18** for GHSA-6q48-6c7w-9gw2 / PYSEC-2026-4320
@@ -242,7 +240,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   getting-started, with the scope flags explained and the `.env`-via-
   `--directory` behaviour spelled out. Verified end to end before writing.
 
----
 
 ## [0.12.0] — 2026-10-16
 
