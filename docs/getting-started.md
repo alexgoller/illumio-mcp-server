@@ -68,6 +68,19 @@ Use an **absolute** path for `--directory`, and restart Claude Desktop afterward
 > In stdio mode there is no authentication layer — whoever can launch the process gets
 > the `admin` role. That is appropriate for a single-user laptop and nothing else.
 
+**Claude Code instead of (or as well as) Claude Desktop:** one command, no file
+to edit --
+
+```bash
+claude mcp add -s user illumio-mcp \
+  -e PCE_HOST=https://your-pce.example.com -e PCE_PORT=443 -e PCE_ORG_ID=1 \
+  -e API_KEY=api_xxxxxxxxxxxxxxxx -e API_SECRET=your_api_secret \
+  -- uv --directory /path/to/illumio-mcp-server run illumio-mcp
+```
+
+then `claude mcp get illumio-mcp` should say `Connected`. Details and the
+scope flags are in [Stdio mode](operations/stdio-mode.md#claude-code).
+
 ## 3. First queries
 
 Start read-only to confirm the wiring:

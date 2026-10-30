@@ -96,6 +96,40 @@ Add the following to the `custom_settings` section:
 }
 ```
 
+## Using with Claude Code
+
+One command registers the server as a stdio MCP server for Claude Code. Replace
+the path and the five PCE values; `-s user` makes it available in every project
+(`-s project` writes a shareable `.mcp.json` into the current repo instead --
+do not put real credentials in that one).
+
+```bash
+claude mcp add -s user illumio-mcp \
+  -e PCE_HOST=https://your-pce.example.com \
+  -e PCE_PORT=443 \
+  -e PCE_ORG_ID=1 \
+  -e API_KEY=api_xxxxxxxxxxxxxxxx \
+  -e API_SECRET=your_api_secret \
+  -- uv --directory /path/to/illumio-mcp-server run illumio-mcp
+```
+
+Optional: `-e PCE_TLS_VERIFY=false` for a self-signed PCE certificate, and
+`-e MCP_LOG_LEVEL=DEBUG` while diagnosing (the log is `illumio-mcp.log` in the
+repo directory, because `--directory` makes it the working directory).
+
+Verify, then ask Claude Code to call `check-pce-connection`:
+
+```bash
+claude mcp get illumio-mcp      # Status: ✔ Connected, and the env you set
+claude mcp list                 # every server and whether it connects
+claude mcp remove -s user illumio-mcp   # to undo
+```
+
+Already have a `.env` in the repo? The server loads it from the working
+directory, so with `--directory` set you can omit the `-e` flags entirely --
+but the file then holds the secrets, so keep it out of git (it is in
+`.gitignore`).
+
 ## HTTP transport with OAuth Resource Server (Phase 3a)
 
 The server runs over HTTP using the MCP Streamable HTTP transport (spec rev
