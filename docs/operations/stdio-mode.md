@@ -90,6 +90,41 @@ API_SECRET=your_api_secret
 
 ---
 
+## Claude Code
+
+Claude Code registers MCP servers from the command line; nothing is edited by hand.
+
+```bash
+claude mcp add -s user illumio-mcp \
+  -e PCE_HOST=https://your-pce.example.com \
+  -e PCE_PORT=443 \
+  -e PCE_ORG_ID=1 \
+  -e API_KEY=api_xxxxxxxxxxxxxxxx \
+  -e API_SECRET=your_api_secret \
+  -- uv --directory /path/to/illumio-mcp-server run illumio-mcp
+```
+
+| Flag | Meaning |
+|---|---|
+| `-s user` | available in every project, stored in your user config. `-s local` (default) is this project only; `-s project` writes `.mcp.json` into the repo for the team -- never with real credentials |
+| `-e KEY=value` | environment for the server process; same variables as the `.env` file |
+| `--` | everything after it is the server command: `uv --directory <repo> run illumio-mcp` |
+
+`--directory` also makes the repo the server's working directory, so a `.env`
+there is loaded (the `-e` flags then become optional) and `illumio-mcp.log`
+is written there. Add `-e PCE_TLS_VERIFY=false` for a self-signed certificate.
+
+Check it:
+
+```bash
+claude mcp get illumio-mcp     # Status: ✔ Connected
+claude mcp list
+```
+
+Then, in a Claude Code session, ask for `check-pce-connection`; it returns the
+PCE's HTTP status and round-trip time as JSON. Remove with
+`claude mcp remove -s user illumio-mcp`.
+
 ## Cursor
 
 In Cursor, add the server to your MCP configuration (Settings → MCP):

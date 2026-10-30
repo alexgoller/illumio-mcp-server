@@ -224,6 +224,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `pversion: active`, and says which in `policy_version`; before, the
   version was implicit.
 
+### Security
+
+- **certifi >= 2026.10.18** for GHSA-6q48-6c7w-9gw2 / PYSEC-2026-4320
+  (published 2026-10-20): earlier bundles trust emSign root CAs whose
+  intermediate keys were compromised. certifi is the CA bundle this server
+  uses to verify the PCE's TLS certificate, so a stale bundle is not a
+  theoretical problem here. Transitive via requests; pinned as a constraint.
+  OSV: 2 advisories -> 0.
+
+### Docs
+
+- **Claude Code setup in one command** -- `claude mcp add … -- uv --directory
+  <repo> run illumio-mcp` -- in the README, the stdio-mode page and
+  getting-started, with the scope flags explained and the `.env`-via-
+  `--directory` behaviour spelled out. Verified end to end before writing.
+
+
 ## [0.12.0] — 2026-10-16
 
 ### Added
