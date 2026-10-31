@@ -3177,7 +3177,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="create-iplist",
-            description="Create a new IP List in the PCE",
+            description="Create an IP List from IP ranges, FQDNs (api.example.com, *.example.com), or both. At least one entry is required.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -3216,12 +3216,17 @@ async def handle_list_tools() -> list[types.Tool]:
                             "required": ["from_ip"]
                         }
                     },
+                    "fqdns": {
+                        "type": "array",
+                        "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"fqdn": {"type": "string"}, "description": {"type": "string"}}, "required": ["fqdn"]}]},
+                        "description": "FQDN entries, e.g. [\"*.example.com\", {\"fqdn\": \"api.example.com\", \"description\": \"vendor API\"}]. An IP list can be FQDN-only; ip_ranges is then optional."
+                    },
                     "fqdn": {
                         "type": "string",
-                        "description": "Fully Qualified Domain Name (optional)"
+                        "description": "Deprecated alias for a single fqdns entry; use fqdns."
                     }
                 },
-                "required": ["name", "ip_ranges"]
+                "required": ["name"]
             }
         ),
         types.Tool(
@@ -3269,9 +3274,14 @@ async def handle_list_tools() -> list[types.Tool]:
                             "required": ["from_ip"]
                         }
                     },
+                    "fqdns": {
+                        "type": "array",
+                        "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"fqdn": {"type": "string"}, "description": {"type": "string"}}, "required": ["fqdn"]}]},
+                        "description": "Replaces the IP list's FQDN entries (like ip_ranges replaces the ranges). Omit to leave them unchanged."
+                    },
                     "fqdn": {
                         "type": "string",
-                        "description": "New Fully Qualified Domain Name (optional)"
+                        "description": "Deprecated alias for a single fqdns entry; use fqdns."
                     }
                 }
             }

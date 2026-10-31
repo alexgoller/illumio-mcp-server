@@ -252,6 +252,44 @@ class TestIPLists:
         text = result.content[0].text
         assert text
 
+    async def test_fqdn_iplist_lifecycle(self):
+        """An FQDN-only IP list: create, read back, update, delete.
+
+        Field report, 2026-10-31: "FQDN IPList creation doesn't work". It never
+        had: the handler required ip_ranges and sent `fqdn` (406 from the PCE,
+        whose field is `fqdns`). Verified live before this test was written."""
+        name = "__mcp_test_fqdn_iplist__"
+        async with stdio_client(get_server_params()) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                existing = parse_result(await session.call_tool("get-iplists", {"name": name}))
+                for l in (existing.get("ip_lists") or []) if isinstance(existing, dict) else []:
+                    if l.get("name") == name:
+                        await session.call_tool("delete-iplist", {"href": l["href"]})
+
+                created = parse_result(await session.call_tool("create-iplist", {
+                    "name": name, "description": "MCP FQDN lifecycle test",
+                    "fqdns": ["*.example.com", {"fqdn": "api.example.com", "description": "vendor API"}],
+                }))
+                assert_no_error(created, "Create FQDN IP list")
+                assert [f["fqdn"] for f in created["fqdns"]] == ["*.example.com", "api.example.com"], created
+                assert created["ip_ranges"] == []
+                href = created["href"]
+                try:
+                    back = parse_result(await session.call_tool("get-iplists", {"name": name}))
+                    mine = [l for l in back["ip_lists"] if l["name"] == name]
+                    assert mine and [f["fqdn"] for f in mine[0]["fqdns"]] == ["*.example.com", "api.example.com"], back
+
+                    updated = parse_result(await session.call_tool("update-iplist", {
+                        "href": href, "fqdns": ["cdn.example.com"], "ip_ranges": [{"from_ip": "192.0.2.0/24"}],
+                    }))
+                    assert_no_error(updated, "Update FQDN IP list")
+                    assert [f["fqdn"] for f in updated["fqdns"]] == ["cdn.example.com"], updated
+                    assert updated["ip_ranges"][0]["from_ip"] == "192.0.2.0/24"
+                finally:
+                    deleted = parse_result(await session.call_tool("delete-iplist", {"href": href}))
+                    assert_no_error(deleted, "Delete FQDN IP list")
+
     async def test_iplist_lifecycle(self):
         """Create, update, and delete an IP list."""
         async with stdio_client(get_server_params()) as (read, write):

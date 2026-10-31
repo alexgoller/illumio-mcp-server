@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 from ipaddress import ip_address, ip_network
 import mcp.types as types
@@ -26,6 +27,64 @@ def _range_dict(r) -> dict:
 
 def _fqdn_dict(f) -> dict:
     return {"fqdn": getattr(f, "fqdn", None), "description": getattr(f, "description", None)}
+
+
+_FQDN_RE = re.compile(r"^(\*\.)?([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9-]{1,63}$|"
+                      r"^(\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+
+
+def _fqdn_entries(arguments: dict) -> list[dict]:
+    """The PCE wants `fqdns: [{fqdn, description?}]`. The old schema exposed a
+    single `fqdn` string, and the handler forwarded it under that name -- which
+    the PCE rejects with 406 "additional properties [fqdn] outside of the
+    schema". Accept the old spelling and both shapes, send the right one.
+    """
+    raw = []
+    if arguments.get("fqdns") is not None:
+        raw += list(arguments["fqdns"]) if isinstance(arguments["fqdns"], (list, tuple)) else [arguments["fqdns"]]
+    if arguments.get("fqdn") is not None:
+        raw += list(arguments["fqdn"]) if isinstance(arguments["fqdn"], (list, tuple)) else [arguments["fqdn"]]
+    out = []
+    for item in raw:
+        if isinstance(item, dict):
+            name, desc = item.get("fqdn"), item.get("description")
+        else:
+            name, desc = item, None
+        name = str(name or "").strip()
+        if not _FQDN_RE.match(name):
+            raise ValueError(f"{item!r} is not a valid FQDN: use a hostname like api.example.com, "
+                             f"or a wildcard like *.example.com (no scheme, path or spaces)")
+        entry = {"fqdn": name}
+        if desc:
+            entry["description"] = str(desc)
+        out.append(entry)
+    return out
+
+
+def _range_entries(arguments: dict) -> list[dict]:
+    ip_ranges = []
+    for range_def in arguments.get("ip_ranges") or []:
+        ip_range = {"from_ip": range_def["from_ip"], "exclusion": range_def.get("exclusion", False)}
+        if "to_ip" in range_def:
+            ip_range["to_ip"] = range_def["to_ip"]
+        if "description" in range_def:
+            ip_range["description"] = range_def["description"]
+        ip_ranges.append(ip_range)
+    return ip_ranges
+
+
+def _iplist_response(iplist) -> dict:
+    return {
+        "href": iplist.href,
+        "name": iplist.name,
+        "description": getattr(iplist, "description", None),
+        "ip_ranges": [
+            {"from_ip": r.from_ip, "to_ip": getattr(r, "to_ip", None),
+             "description": getattr(r, "description", None), "exclusion": getattr(r, "exclusion", False)}
+            for r in (getattr(iplist, "ip_ranges", None) or [])
+        ],
+        "fqdns": [_fqdn_dict(f) for f in (getattr(iplist, "fqdns", None) or [])],
+    }
 
 
 def _range_contains(addr, rng: dict) -> bool:
@@ -158,57 +217,23 @@ def handle_create_iplist(ctx, arguments: dict) -> list:
                 }, indent=2)
             )]
 
-        # Create IP ranges
-        ip_ranges = []
-        for range_def in arguments["ip_ranges"]:
-            ip_range = {
-                "from_ip": range_def["from_ip"],
-                "exclusion": range_def.get("exclusion", False)
-            }
+        ip_ranges = _range_entries(arguments)
+        fqdns = _fqdn_entries(arguments)
+        if not ip_ranges and not fqdns:
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": "An IP list needs at least one entry: pass ip_ranges "
+                         "([{from_ip, to_ip?, exclusion?, description?}]), fqdns "
+                         "([\"*.example.com\", {fqdn, description?}]), or both."}, indent=2))]
 
-            # Add optional fields if present
-            if "to_ip" in range_def:
-                ip_range["to_ip"] = range_def["to_ip"]
-            if "description" in range_def:
-                ip_range["description"] = range_def["description"]
-
-            ip_ranges.append(ip_range)
-
-        # Create the IP List object
-        iplist_data = {
-            "name": arguments["name"],
-            "ip_ranges": ip_ranges
-        }
-
-        # Add optional fields if present
+        iplist_data = {"name": arguments["name"], "ip_ranges": ip_ranges}
         if "description" in arguments:
             iplist_data["description"] = arguments["description"]
-        if "fqdn" in arguments:
-            iplist_data["fqdn"] = arguments["fqdn"]
+        if fqdns:
+            iplist_data["fqdns"] = fqdns
 
         logger.debug(f"Creating IP List with data: {json.dumps(iplist_data, indent=2)}")
         iplist = pce.ip_lists.create(iplist_data)
-
-        # Format response
-        response_data = {
-            "href": iplist.href,
-            "name": iplist.name,
-            "description": getattr(iplist, "description", None),
-            "ip_ranges": [
-                {
-                    "from_ip": r.from_ip,
-                    "to_ip": getattr(r, "to_ip", None),
-                    "description": getattr(r, "description", None),
-                    "exclusion": getattr(r, "exclusion", False)
-                } for r in iplist.ip_ranges
-            ],
-            "fqdn": getattr(iplist, "fqdn", None)
-        }
-
-        return [types.TextContent(
-            type="text",
-            text=json.dumps(response_data, indent=2)
-        )]
+        return [types.TextContent(type="text", text=json.dumps(_iplist_response(iplist), indent=2))]
 
     except Exception as e:
         error_msg = f"Failed to create IP List: {describe_error(e)}"
@@ -258,8 +283,8 @@ def handle_update_iplist(ctx, arguments: dict) -> list:
         update_data = {}
         if "description" in arguments:
             update_data["description"] = arguments["description"]
-        if "fqdn" in arguments:
-            update_data["fqdn"] = arguments["fqdn"]
+        if "fqdns" in arguments or "fqdn" in arguments:
+            update_data["fqdns"] = _fqdn_entries(arguments)     # replaces the list, like ip_ranges
         if "ip_ranges" in arguments:
             ip_ranges = []
             for range_def in arguments["ip_ranges"]:
@@ -303,8 +328,7 @@ def handle_update_iplist(ctx, arguments: dict) -> list:
                 response_data["ip_ranges"].append(range_data)
 
         # Add FQDN if it exists
-        if hasattr(updated_iplist, "fqdn"):
-            response_data["fqdn"] = updated_iplist.fqdn
+        response_data["fqdns"] = [_fqdn_dict(f) for f in (getattr(updated_iplist, "fqdns", None) or [])]
 
         return [types.TextContent(
             type="text",

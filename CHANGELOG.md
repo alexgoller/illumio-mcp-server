@@ -22,6 +22,33 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **FQDN IP lists can be created and updated.** They never could: the
+  handler required `ip_ranges` (an FQDN-only call died with
+  `KeyError: 'ip_ranges'`), and it forwarded the schema's single `fqdn`
+  string under that name, which the PCE rejects with 406 *additional
+  properties ["fqdn"] outside of the schema* -- the field is `fqdns`, a list
+  of `{fqdn, description}`. `create-iplist` and `update-iplist` now take
+  `fqdns` (strings or objects), `ip_ranges` is optional, at least one entry
+  is required, and each FQDN is checked for shape before the PCE sees it.
+  Responses carry `fqdns` as data. Verified live on demo100: FQDN-only create,
+  read-back, update, and the old `fqdn` spelling, which still works.
+
+### Unlearn
+
+- **`create-iplist` / `update-iplist` take `fqdns`, a list; `fqdn` is a
+  deprecated alias.** A session that passed `fqdn` and saw 406 or
+  `KeyError` was never wrong about the PCE -- the server was.
+- **`ip_ranges` is no longer required on `create-iplist`.** An FQDN-only
+  list is a normal list.
+- **The create/update responses say `fqdns`, not `fqdn`** (which was always
+  `null`).
+
+---
+
 ## [0.13.0] — 2026-10-30
 
 ### Added

@@ -51,7 +51,7 @@ HTTP mode; in stdio mode every caller is `admin`.
 
 | Tool | Access | Type | Description |
 |---|---|---|---|
-| `create-iplist` | operator | **write** | Create a new IP List in the PCE |
+| `create-iplist` | operator | **write** | Create an IP List from IP ranges, FQDNs (api.example.com, *.example.com), or both. At least one entry is required. |
 | `delete-iplist` | operator | **write** | Delete an IP List from the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List. |
 | `get-iplists` | reader | *read* | Get IP lists from the PCE with optional filtering. Each list carries ip_ranges as [{from_ip, to_ip, exclusion, description}] an... |
 | `update-iplist` | operator | **write** | Update an existing IP List in the PCE. Provide either 'href' or 'name' (but not both) to identify the IP List. |
