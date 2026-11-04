@@ -143,6 +143,62 @@ JSON_SOURCES = [
         "format": "gcp",
     },
 
+    # --- AI agents reaching YOUR workloads --------------------------------
+    #
+    # Surveyed 2026-11-04 before adding anything: api.openai.com,
+    # api.mistral.ai, api.perplexity.ai, api.x.ai, api.groq.com, Together,
+    # Replicate, Stability, OpenRouter resolve into Cloudflare; DeepSeek and
+    # Hugging Face into CloudFront; Cohere, ElevenLabs, Fireworks, Ollama into
+    # Google Cloud; Cursor into EC2. None of those is attributable by address,
+    # and no entry here claims it. Anthropic (own /21) and GitHub Copilot
+    # (GitHub's /20) already are, above.
+    #
+    # What vendors DO publish, exactly, is the other direction: the egress
+    # addresses their crawlers and user-triggered agents fetch from. A hit on
+    # one of these as a SOURCE means an AI agent reached a workload --
+    # find-unknown-endpoints attributes unknown sources through the same
+    # table. `likely` because each is the vendor's own declaration of its own
+    # addresses, published for exactly this purpose.
+    {
+        "provider_prefix": "openai-gptbot",
+        "confidence": "likely",
+        "url": "https://openai.com/gptbot.json",
+        "format": "gcp",                      # same {"prefixes":[{"ipv4Prefix"}]} shape
+    },
+    {
+        "provider_prefix": "openai-searchbot",
+        "confidence": "likely",
+        "url": "https://openai.com/searchbot.json",
+        "format": "gcp",
+    },
+    {
+        "provider_prefix": "openai-chatgpt-user",
+        "confidence": "likely",
+        "url": "https://openai.com/chatgpt-user.json",   # served as octet-stream; still JSON
+        "format": "gcp",
+    },
+    {
+        "provider_prefix": "perplexity-bot",
+        "confidence": "likely",
+        "url": "https://www.perplexity.com/perplexitybot.json",
+        "format": "gcp",
+    },
+    {
+        "provider_prefix": "perplexity-user",
+        "confidence": "likely",
+        "url": "https://www.perplexity.com/perplexity-user.json",
+        "format": "gcp",
+    },
+    {
+        "provider_prefix": "google-user-fetchers",
+        "confidence": "likely",
+        # Google's user-triggered fetchers (Gemini and other on-behalf-of-a-user
+        # fetches). Subsets of goog.json, so the specific name wins by prefix
+        # length over the coarse google-services bucket.
+        "url": "https://developers.google.com/static/search/apis/ipranges/user-triggered-fetchers-google.json",
+        "format": "gcp",
+    },
+
     # --- SaaS, from each vendor's own published list -----------------------
     #
     # Surveyed before choosing: resolving each vendor's well-known hostname and
@@ -431,6 +487,40 @@ def _cidr_sort_key(cidr: str):
     return (net.version, int(net.network_address), net.prefixlen)
 
 
+
+# One vendor, several agent lists, the same addresses in more than one of
+# them: OpenAI publishes six /25s under both gptbot.json and searchbot.json.
+# Two providers claiming the identical CIDR would make the lookup depend on
+# load order, and the validator rightly refuses it. The address is still
+# unambiguously the vendor's, so it moves to a combined entry that says so.
+SHARED_AGENT_PROVIDERS = {"openai": "openai-agents"}
+
+
+def _merge_shared_agent_ranges(entries: list[dict], problems: list) -> list[dict]:
+    by_cidr: dict[str, list[dict]] = {}
+    for e in entries:
+        for c in e["cidrs"]:
+            by_cidr.setdefault(c, []).append(e)
+    moved: dict[str, set] = {}
+    urls: dict[str, set] = {}
+    for cidr, owners in by_cidr.items():
+        if len(owners) < 2:
+            continue
+        vendors = {o["provider"].split("-", 1)[0] for o in owners}
+        if len(vendors) != 1 or next(iter(vendors)) not in SHARED_AGENT_PROVIDERS:
+            continue                                   # cross-vendor: leave for _validate
+        merged = SHARED_AGENT_PROVIDERS[next(iter(vendors))]
+        for o in owners:
+            o["cidrs"] = [c for c in o["cidrs"] if c != cidr]
+            urls.setdefault(merged, set()).update(o.get("source_urls") or [])
+        moved.setdefault(merged, set()).add(cidr)
+    out = [e for e in entries if e["cidrs"]]
+    for merged, cidrs in moved.items():
+        out.append({"provider": merged, "confidence": "likely", "cidrs": sorted(cidrs),
+                    "source": "published", "source_urls": sorted(urls[merged]),
+                    "note": "listed under several of the vendor's agent lists"})
+    return out
+
 def _validate(entries: list[dict], previous: dict | None, problems: list) -> None:
     """Refuse to ship a table that is worse than the one already committed.
 
@@ -490,6 +580,7 @@ def build(problems: list, previous: dict | None) -> dict:
 
     entries = _split_google_services(entries)
     entries.sort(key=lambda e: e["provider"])
+    entries = _merge_shared_agent_ranges(entries, problems)
     _validate(entries, previous, problems)
     return {
         "_comment": (

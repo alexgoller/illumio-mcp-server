@@ -144,3 +144,47 @@ def test_anthropic_range_covers_the_full_rdap_allocation():
     """ARIN allocates 160.79.104.0/21; an earlier hand-written /23 silently
     missed real Claude traffic in the rest of the block."""
     assert classify_destination("160.79.111.5") == ("anthropic", "likely")
+
+
+# ---------------------------------------------------------------------------
+# AI agents reaching YOUR workloads (inbound), 2026-11-04
+#
+# Surveyed first: api.openai.com, api.mistral.ai, api.perplexity.ai, api.x.ai,
+# api.groq.com and most other AI APIs resolve into Cloudflare; DeepSeek and
+# Hugging Face into CloudFront; Cohere, ElevenLabs, Fireworks into Google
+# Cloud; Cursor into EC2. None of those is attributable by address and this
+# table must not pretend otherwise. What IS attributable is the other
+# direction: OpenAI and Perplexity publish the exact egress addresses their
+# crawlers and user-triggered agents fetch from.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("ip, provider", [
+    ("132.196.86.10", "openai-gptbot"),          # openai.com/gptbot.json
+    ("104.210.140.130", "openai-searchbot"),     # openai.com/searchbot.json
+    ("104.208.184.200", "openai-chatgpt-user"),  # openai.com/chatgpt-user.json
+    ("107.20.236.150", "perplexity-bot"),        # perplexity.com/perplexitybot.json
+    ("18.97.43.80", "perplexity-user"),          # perplexity.com/perplexity-user.json
+])
+def test_ai_agent_egress_addresses_are_attributed_as_likely(ip, provider):
+    assert classify_destination(ip) == (provider, "likely")
+
+
+def test_openai_api_endpoint_is_still_cloudflare_not_openai():
+    """162.159.140.245 is what api.openai.com resolved to on 2026-11-04. It is
+    Cloudflare's, shared with thousands of tenants. Naming OpenAI here would
+    be the false positive the whole table exists to avoid."""
+    assert classify_destination("162.159.140.245") == ("cloudflare-fronted", "ambiguous")
+
+
+def test_agent_ranges_beat_the_coarse_cloud_bucket_they_sit_inside():
+    """GPTBot's 172.182.202.0/25 is Microsoft space (20.0.0.0/8 is not, but
+    OpenAI's Azure-hosted egress historically was). Whatever bucket a
+    published agent range sits inside, the specific declaration wins."""
+    provider, confidence = classify_destination("172.182.202.5")
+    assert provider == "openai-gptbot" and confidence == "likely"
+
+
+def test_ranges_openai_lists_under_several_agents_attribute_to_openai_agents():
+    """gptbot.json and searchbot.json both carry 4.227.36.0/25. One address,
+    one vendor, two of its agents: say the vendor, not a coin toss."""
+    assert classify_destination("4.227.36.10") == ("openai-agents", "likely")
