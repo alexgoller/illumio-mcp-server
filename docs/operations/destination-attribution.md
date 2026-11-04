@@ -82,6 +82,32 @@ result:
 
 ---
 
+## AI agents reaching your workloads
+
+The egress question ("did this process talk to OpenAI?") is mostly unanswerable
+by address: `api.openai.com`, `api.mistral.ai`, `api.perplexity.ai`, `api.x.ai`,
+`api.groq.com`, Together, Replicate, Stability and OpenRouter all resolve into
+Cloudflare; DeepSeek and Hugging Face into CloudFront; Cohere, ElevenLabs,
+Fireworks and Ollama into Google Cloud; Cursor into EC2 (surveyed 4 Nov 2026).
+Only Anthropic (its own 160.79.104.0/21) and GitHub Copilot (GitHub's
+140.82.112.0/20) own their endpoints, and the table says so and nothing more.
+
+The *inbound* question is answerable, because the vendors publish the exact
+addresses their agents fetch from:
+
+| Provider | What a hit as a **source** means | Source |
+|---|---|---|
+| `openai-gptbot` | OpenAI's training crawler fetched from this workload | openai.com/gptbot.json |
+| `openai-searchbot` | ChatGPT search indexed it | openai.com/searchbot.json |
+| `openai-chatgpt-user` | a ChatGPT user had the model fetch it on their behalf | openai.com/chatgpt-user.json |
+| `openai-agents` | an address OpenAI lists under more than one of the above | both lists |
+| `perplexity-bot` / `perplexity-user` | Perplexity's crawler, or a user-triggered fetch | perplexity.com |
+| `google-user-fetchers` | a Google user-triggered fetcher (Gemini and similar) | developers.google.com |
+
+All `likely`: each is the vendor's own declaration, published for this purpose.
+`find-unknown-endpoints` attributes unknown sources through the same table, so
+"an AI agent reached an enforced workload" falls out of it without a flag.
+
 ## What it cannot identify, and why
 
 Some SaaS cannot be attributed by IP **at all**, because they do not own the

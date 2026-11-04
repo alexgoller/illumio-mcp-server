@@ -22,6 +22,44 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **AI agents reaching your workloads are attributable.** Six providers from
+  vendor-published egress lists, all `likely`: `openai-gptbot` (12),
+  `openai-searchbot` (33), `openai-chatgpt-user` (235), `openai-agents` (6
+  addresses OpenAI lists under more than one agent), `perplexity-bot` (13),
+  `perplexity-user` (10) and `google-user-fetchers` (504). A hit on one of
+  these as a *source* means an AI agent fetched from the workload;
+  `find-unknown-endpoints` reports it as `likely_provider` with no new code.
+  Table: 21 -> 28 providers, 3,518 -> 4,331 ranges.
+
+  Surveyed before adding: the AI *APIs* themselves -- OpenAI, Mistral,
+  Perplexity, xAI, Groq, Together, Replicate, Stability, OpenRouter
+  (Cloudflare), DeepSeek, Hugging Face (CloudFront), Cohere, ElevenLabs,
+  Fireworks, Ollama (Google Cloud), Cursor (EC2) -- are not attributable by
+  address and the table still says nothing about them. Anthropic and GitHub
+  Copilot already were.
+
+### Fixed
+
+- **The weekly range refresh explains itself when it cannot open a PR.** It
+  failed on 2 and 4 Nov at the last step -- the repository did not allow
+  Actions to create pull requests -- after generating a correct table. The
+  job now names the cause, the one-time setting, and the branch holding the
+  refreshed table.
+- **`.gitignore` `data/` is anchored to the repo root**; it also matched
+  `src/illumio_mcp/data`, where the attribution table lives.
+
+### Unlearn
+
+- **A `likely_provider` of `openai-*` on a SOURCE is an agent, not an API
+  call.** Nothing in the table attributes traffic *to* OpenAI; that goes to
+  Cloudflare and is reported as `cloudflare-fronted`.
+
+---
+
 ## [0.13.1] — 2026-10-31
 
 ### Fixed
