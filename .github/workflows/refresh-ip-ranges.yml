@@ -86,6 +86,13 @@ jobs:
           PY
 
       - name: Open a pull request if the table changed
+        id: pr
+        # A repository that has not ticked "Allow GitHub Actions to create and
+        # approve pull requests" makes this step fail AFTER the branch is
+        # pushed, with the refreshed table sitting unreviewed on it. Seen on
+        # 2026-11-02 and again on 2026-11-04. Do not let that look like a
+        # refresh failure: continue, and say exactly what is blocking.
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v6
         with:
           add-paths: src/illumio_mcp/data/ip_ranges.json
@@ -117,3 +124,12 @@ jobs:
             ```
             ${{ steps.refresh.outputs.warnings }}
             ```
+
+      - name: Explain a blocked pull request
+        if: steps.pr.outcome == 'failure'
+        run: |
+          echo "::error::The refreshed table was generated and verified, but this repository does not allow GitHub Actions to open pull requests."
+          echo "::error::Fix once: Settings -> Actions -> General -> Workflow permissions -> tick 'Allow GitHub Actions to create and approve pull requests'."
+          echo "::error::Or via the API: gh api -X PUT repos/${{ github.repository }}/actions/permissions/workflow -f default_workflow_permissions=write -F can_approve_pull_request_reviews=true"
+          echo "::error::Until then the refreshed table is on branch chore/refresh-ip-ranges: https://github.com/${{ github.repository }}/compare/chore/refresh-ip-ranges?expand=1"
+          exit 1
