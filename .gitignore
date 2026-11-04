@@ -42,7 +42,7 @@ illumio-platform-api.pdf
 
 # Runtime state. data/audit.db holds a record of every tool call and
 # data/jti.db holds replay-protection state; neither belongs in git.
-data/
+/data/
 
 # Captured HTTP traffic. HAR files record full request headers -- the ones in
 # this repo carry Authorization and Set-Cookie -- so they are credential
