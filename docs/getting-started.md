@@ -79,7 +79,10 @@ claude mcp add -s user illumio-mcp \
 ```
 
 then `claude mcp get illumio-mcp` should say `Connected`. Details and the
-scope flags are in [Stdio mode](operations/stdio-mode.md#claude-code).
+scope flags are in [Stdio mode](operations/stdio-mode.md#claude-code). No
+clone needed: `-- uvx --env-file /path/to/illumio.env --from
+"git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1" illumio-mcp`
+works in the same command.
 
 ## 3. First queries
 

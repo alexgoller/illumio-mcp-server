@@ -52,6 +52,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`.gitignore` `data/` is anchored to the repo root**; it also matched
   `src/illumio_mcp/data`, where the attribution table lives.
 
+### Docs
+
+- **Install and run with `uvx`, no clone**: `uvx --env-file <env> --from
+  "git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1" illumio-mcp`,
+  for the shell, Claude Code (`claude mcp add … -- uvx …`) and Claude Desktop
+  (absolute path to `uvx`). The wheel carries the attribution data;
+  `--env-file` replaces the repository `.env`. Verified end to end.
+
 ### Unlearn
 
 - **A `likely_provider` of `openai-*` on a SOURCE is an agent, not an API

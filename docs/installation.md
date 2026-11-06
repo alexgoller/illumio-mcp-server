@@ -35,6 +35,21 @@ uv sync
 `uv sync` resolves from `uv.lock`, so you get the exact dependency set the project tests
 against — including the security floors on transitive packages.
 
+## With uvx (no clone)
+
+```bash
+uvx --env-file /path/to/illumio.env \
+    --from "git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1" illumio-mcp
+```
+
+Builds from GitHub into uv's cache and runs the `illumio-mcp` console script;
+the attribution data ships inside the wheel. `--env-file` carries the PCE
+credentials because there is no repository directory for `.env` to be found
+in. Pin a tag; `@main` for the latest; `uvx --refresh …` to rebuild. First run
+~15 s, then sub-second. The same command line registers it with Claude Code
+(`claude mcp add -s user illumio-mcp -- uvx …`) and, with the absolute path to
+`uvx`, with Claude Desktop -- see [Stdio mode](operations/stdio-mode.md).
+
 ## With pip
 
 ```bash
