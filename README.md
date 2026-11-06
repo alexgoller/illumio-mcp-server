@@ -96,6 +96,43 @@ Add the following to the `custom_settings` section:
 }
 ```
 
+## No clone: run it with uvx
+
+`uvx` builds the server from GitHub into its cache and runs the console script;
+nothing to clone, no virtualenv to manage, and a tag pins the version:
+
+```bash
+uvx --env-file /path/to/illumio.env \
+    --from "git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1" illumio-mcp
+```
+
+`--env-file` is how credentials reach it: there is no repository directory, so
+the usual `.env` auto-load does not happen. Use `@main` for the latest, and
+`uvx --refresh …` when a tag moves or you want a fresh build; the first run
+compiles the package (~15 s), later runs start in under a second. Verified
+end to end on 2026-11-06: 55 tools, `check-pce-connection` ok.
+
+Register it with Claude Code the same way, replacing the `uv --directory` form:
+
+```bash
+claude mcp add -s user illumio-mcp \
+  -- uvx --env-file /path/to/illumio.env \
+     --from "git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1" illumio-mcp
+```
+
+Claude Desktop needs the absolute path to `uvx` (it does not inherit your
+shell's PATH); `which uvx` tells you (`/opt/homebrew/bin/uvx` on a Homebrew
+Mac):
+
+```json
+"illumio-mcp": {
+  "command": "/opt/homebrew/bin/uvx",
+  "args": ["--env-file", "/path/to/illumio.env",
+           "--from", "git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1",
+           "illumio-mcp"]
+}
+```
+
 ## Using with Claude Code
 
 One command registers the server as a stdio MCP server for Claude Code. Replace

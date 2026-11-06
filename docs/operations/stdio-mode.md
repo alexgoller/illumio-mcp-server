@@ -90,6 +90,21 @@ API_SECRET=your_api_secret
 
 ---
 
+### Using uvx (no clone)
+
+```json
+"illumio-mcp": {
+  "command": "/opt/homebrew/bin/uvx",
+  "args": ["--env-file", "/path/to/illumio.env",
+           "--from", "git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1",
+           "illumio-mcp"]
+}
+```
+
+Absolute path to `uvx`, because Claude Desktop does not inherit a shell PATH
+(`which uvx`). `--env-file` replaces the repository `.env`; the file holds the
+same five `PCE_*` / `API_*` variables. Pin a tag.
+
 ## Claude Code
 
 Claude Code registers MCP servers from the command line; nothing is edited by hand.
@@ -113,6 +128,15 @@ claude mcp add -s user illumio-mcp \
 `--directory` also makes the repo the server's working directory, so a `.env`
 there is loaded (the `-e` flags then become optional) and `illumio-mcp.log`
 is written there. Add `-e PCE_TLS_VERIFY=false` for a self-signed certificate.
+
+No clone at all: swap the server command for `uvx`, and supply credentials
+with its `--env-file` (there is no repo directory to find `.env` in):
+
+```bash
+claude mcp add -s user illumio-mcp \
+  -- uvx --env-file /path/to/illumio.env \
+     --from "git+https://github.com/alexgoller/illumio-mcp-server@v0.13.1" illumio-mcp
+```
 
 Check it:
 
