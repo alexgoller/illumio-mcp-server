@@ -17,7 +17,11 @@ import sys
 import mcp.types as t
 
 import illumio_mcp.server as S
-from illumio_mcp.tools import TOOL_REGISTRY
+import os
+# Optional features never appear in the public tool reference, whoever runs
+# the generator: docs/tools.md must not depend on the environment.
+os.environ["MCP_HIDE_FEATURES"] = "cloud"
+from illumio_mcp.tools import TOOL_REGISTRY, visible_tools  # noqa: E402
 
 OUT = pathlib.Path(__file__).resolve().parents[1] / "docs" / "tools.md"
 
@@ -109,7 +113,7 @@ def render() -> str:
     listed = asyncio.run(handler(t.ListToolsRequest(method="tools/list"))).root.tools
     tools = {x.name: x for x in listed}
 
-    out = [HEADER.format(n=len(TOOL_REGISTRY))]
+    out = [HEADER.format(n=len(visible_tools()))]
     seen: set[str] = set()
     for title, keys in GROUPS:
         names = [n for n in sorted(tools) if any(k in n for k in keys) and n not in seen]
@@ -150,7 +154,7 @@ if __name__ == "__main__":
         if current != content:
             print(f"{OUT} is out of date; run: python scripts/gen_tool_docs.py")
             sys.exit(1)
-        print(f"{OUT} is up to date ({len(TOOL_REGISTRY)} tools)")
+        print(f"{OUT} is up to date ({len(visible_tools())} tools)")
     else:
         OUT.write_text(content)
-        print(f"wrote {OUT} ({len(TOOL_REGISTRY)} tools)")
+        print(f"wrote {OUT} ({len(visible_tools())} tools)")

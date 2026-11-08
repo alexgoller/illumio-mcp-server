@@ -32,6 +32,10 @@ class ToolSpec:
         requires_pce: True if the tool needs ctx.pce to be non-None. Defaults
             True. Set to False for credential-management tools that run before
             a user has onboarded (e.g., register-pce-credentials).
+        feature: Name of an optional feature this tool belongs to, or None.
+            A tool with a feature is visible only while
+            features.feature_enabled(feature) is true; otherwise it is not
+            advertised, not routable and not documented.
     """
     handler: Callable
     roles: frozenset[Role] | set[Role]
@@ -39,6 +43,7 @@ class ToolSpec:
     requires_confirm: bool = False
     unscopable: bool = False
     requires_pce: bool = True
+    feature: str | None = None
 
     def __post_init__(self):
         if not self.roles:

@@ -11,7 +11,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 from conftest import get_server_params
-from illumio_mcp.tools import TOOL_REGISTRY
+from illumio_mcp.tools import TOOL_REGISTRY, visible_tools
 
 
 pytestmark = pytest.mark.asyncio
@@ -39,7 +39,7 @@ async def test_advertised_tools_match_registry():
     the server advertised 46.
     """
     advertised = {t.name for t in await _list_tools()}
-    registered = set(TOOL_REGISTRY)
+    registered = set(visible_tools())      # feature-gated tools come and go together on both sides
 
     assert advertised == registered, (
         "tools/list and TOOL_REGISTRY have drifted.\n"

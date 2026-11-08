@@ -14,7 +14,9 @@ from pathlib import Path
 from .context import ToolContext
 from .pce import get_pce_from_env
 from .changelog import changelog_path
-from .tools import TOOL_REGISTRY
+from .tools import TOOL_REGISTRY, visible_tools
+from .tools.cloud_defs import cloud_tool_definitions
+from .features import feature_enabled
 from .auth.audit import AuditEntry, NullAuditLog
 
 
@@ -2296,7 +2298,7 @@ async def handle_list_tools() -> list[types.Tool]:
     List available tools.
     Each tool specifies its arguments using JSON Schema validation.
     """
-    return _annotate_mutating([
+    tools = [
         types.Tool(
             name="get-workloads",
             description="Get workloads from the PCE. Use detail_level to control breadth vs depth: 'compact' (default) for tabular overviews of thousands of workloads, 'full' for complete data on specific workloads, 'labels_only' for maximum breadth with just identity and labels.",
@@ -3931,7 +3933,10 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                 },
             }
         ),
-    ])
+    ]
+    if feature_enabled("cloud"):
+        tools.extend(cloud_tool_definitions())
+    return _annotate_mutating(tools)
 
 # Sensitive-argument redaction lives in log_scrub so tool handlers can use it
 # too; these aliases keep the existing import surface stable.
@@ -3955,7 +3960,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
     # tool it was. The arguments stay at DEBUG.
     logger.info("Tool %s called", name)
     logger.debug("Tool called: %s with arguments: %s", name, _scrub_arguments_for_log(arguments))
-    spec = TOOL_REGISTRY.get(name)
+    spec = visible_tools().get(name)
     if spec is None:
         raise ValueError(f"Unknown tool: {name}")
     ctx = get_active_context()

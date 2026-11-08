@@ -55,8 +55,11 @@ def test_ringfence_batch_requires_confirm():
 def test_count_matches_expected():
     """Sanity check: tool count is stable. Bump this when you intentionally
     add or remove a tool."""
-    assert len(TOOL_REGISTRY) == 55, \
-        f"Tool count drifted to {len(TOOL_REGISTRY)}; update this test if intentional"
+    base = [n for n, s in TOOL_REGISTRY.items() if s.feature is None]
+    gated = [n for n, s in TOOL_REGISTRY.items() if s.feature is not None]
+    assert len(base) == 55, \
+        f"Tool count drifted to {len(base)}; update this test if intentional"
+    assert len(gated) == 6 and all(s.feature == "cloud" for n, s in TOOL_REGISTRY.items() if s.feature), gated
 
 
 def test_published_tool_reference_is_current():
