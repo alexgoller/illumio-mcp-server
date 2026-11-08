@@ -1,3 +1,4 @@
+from illumio_mcp.tools import visible_tools
 """End-to-end tests for the Streamable HTTP transport.
 
 Spins up the HTTP server in a background thread on a random port, then uses the
@@ -95,7 +96,7 @@ async def test_initialize_and_list_tools_over_http(http_server_url):
             # Derived, not hardcoded: a literal count is another place to forget
             # when a tool is added (see tests/test_mcp_protocol.py).
             from illumio_mcp.tools import TOOL_REGISTRY
-            assert set(tool_names) == set(TOOL_REGISTRY)
+            assert set(tool_names) == set(visible_tools())
 
 
 async def test_check_pce_connection_over_http(http_server_url, requires_pce):
@@ -145,4 +146,4 @@ async def test_list_tools_works_without_any_pce_configuration(http_server_url, m
             tools = await session.list_tools()
 
     from illumio_mcp.tools import TOOL_REGISTRY
-    assert {t.name for t in tools.tools} == set(TOOL_REGISTRY)
+    assert {t.name for t in tools.tools} == set(visible_tools())

@@ -12,7 +12,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from illumio_mcp.context import ToolContext
-from illumio_mcp.tools import TOOL_REGISTRY, traffic
+from illumio_mcp.tools import TOOL_REGISTRY, visible_tools, traffic
 from illumio_mcp.tools.rulesets import handle_get_rulesets
 from illumio_mcp.tools.workloads import handle_get_workloads
 
@@ -350,4 +350,4 @@ def test_too_many_buckets_is_rejected_with_a_coarser_suggestion(monkeypatch):
 
 def test_the_three_tools_are_registered():
     # The count canary lives in test_tool_metadata; a second one only drifts.
-    assert {"get-traffic-timeline", "get-workloads", "get-rulesets"} <= set(TOOL_REGISTRY)
+    assert {"get-traffic-timeline", "get-workloads", "get-rulesets"} <= set(visible_tools())
