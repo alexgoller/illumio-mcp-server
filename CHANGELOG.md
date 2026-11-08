@@ -26,6 +26,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Optional, configuration-enabled integrations.** `ToolSpec` gained a
+  `feature` field; a tool with one is visible only while its feature is
+  configured -- not advertised, not routable, not in `docs/tools.md` otherwise.
+  The first such feature is the Illumio Cloud Platform set from the
+  `feature/cloud-platform-api` branch, ported onto the current registry and
+  context, with the server's bounded waits and the auth model the platform
+  actually accepts. Configuration is in `docs/operations/cloud-platform.md`,
+  intentionally outside the navigation.
+
 - **AI agents reaching your workloads are attributable.** Six providers from
   vendor-published egress lists, all `likely`: `openai-gptbot` (12),
   `openai-searchbot` (33), `openai-chatgpt-user` (235), `openai-agents` (6

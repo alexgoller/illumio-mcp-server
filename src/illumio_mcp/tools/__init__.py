@@ -84,6 +84,11 @@ from .sec_rules import handle_update_sec_rule, handle_delete_sec_rule
 from .identity import handle_build_identity_graph
 from .meta import handle_get_server_changelog
 from .capacity import handle_get_pce_capacity
+from .cloud_inventory import handle_cloud_get_resources
+from .cloud_labeling import handle_cloud_assign_labels, handle_cloud_remove_labels
+from .cloud_traffic import (handle_cloud_get_traffic_queries, handle_cloud_create_traffic_query,
+                            handle_cloud_get_traffic_flows)
+from ..features import feature_enabled
 from .compliance_evidence import handle_collect_compliance_evidence
 from .unknown_endpoints import handle_find_unknown_endpoints
 
@@ -167,6 +172,13 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     # this precisely when it cannot trust its cached view of the server.
     "get-server-changelog":       ToolSpec(handle_get_server_changelog, roles=ALL_ROLES, requires_pce=False),
     "get-pce-capacity":           ToolSpec(handle_get_pce_capacity,     roles=ALL_ROLES),
+    # Illumio Cloud Platform -- present only while features.feature_enabled("cloud")
+    "cloud-get-resources":        ToolSpec(handle_cloud_get_resources,        roles=ALL_ROLES, requires_pce=False, feature="cloud"),
+    "cloud-assign-labels":        ToolSpec(handle_cloud_assign_labels,        roles=_OP_ADMIN, requires_pce=False, mutating=True, feature="cloud"),
+    "cloud-remove-labels":        ToolSpec(handle_cloud_remove_labels,        roles=_OP_ADMIN, requires_pce=False, mutating=True, feature="cloud"),
+    "cloud-get-traffic-queries":  ToolSpec(handle_cloud_get_traffic_queries,  roles=ALL_ROLES, requires_pce=False, feature="cloud"),
+    "cloud-create-traffic-query": ToolSpec(handle_cloud_create_traffic_query, roles=ALL_ROLES, requires_pce=False, mutating=True, feature="cloud"),
+    "cloud-get-traffic-flows":    ToolSpec(handle_cloud_get_traffic_flows,    roles=ALL_ROLES, requires_pce=False, feature="cloud"),
 }
 
 
@@ -175,3 +187,11 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
 # no longer used internally; kept as a derived export to avoid breaking any
 # downstream importers.
 TOOL_HANDLERS: dict[str, Callable] = {name: spec.handler for name, spec in TOOL_REGISTRY.items()}
+
+
+def visible_tools() -> dict[str, ToolSpec]:
+    """The registry as a client is allowed to see it: feature-gated tools are
+    present only while their feature is configured. The dispatcher, tools/list
+    and the docs generator all go through this, so a disabled feature is
+    invisible from every side at once."""
+    return {n: s for n, s in TOOL_REGISTRY.items() if s.feature is None or feature_enabled(s.feature)}
