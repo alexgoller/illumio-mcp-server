@@ -57,7 +57,7 @@ def test_count_matches_expected():
     add or remove a tool."""
     base = [n for n, s in TOOL_REGISTRY.items() if s.feature is None]
     gated = [n for n, s in TOOL_REGISTRY.items() if s.feature is not None]
-    assert len(base) == 55, \
+    assert len(base) == 56, \
         f"Tool count drifted to {len(base)}; update this test if intentional"
     assert len(gated) == 6 and all(s.feature == "cloud" for n, s in TOOL_REGISTRY.items() if s.feature), gated
 

@@ -22,6 +22,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`get-traffic-fingerprint`: a snapshot of traffic shape, and the drift
+  since an earlier one.** For the org, one environment (`scope: {env}`) or
+  one app (`scope: {app, env}`): the source x destination x service keys of
+  one window with the decision set each was seen with, and per-app shape
+  (peers in and out, external destinations and sources, services, blocked
+  share, attributed providers). `baseline` (a fingerprint this tool returned
+  earlier) or `baseline_days` (the N days before the window, a second query)
+  turns it into a compare: new, changed and gone keys, drift per app, the
+  peers and providers that came and went. The rules are illumio-tui's
+  traffic and snapshot compare, so the two agree: identity never counts, no
+  `first_detected`, truncation and unequal windows are warned because they
+  inflate `new` or `gone`, and a compare across another PCE, org, scope or
+  identity axis is refused. The default window is exactly `lookback_days`
+  long and ends now, so `baseline_days` equal to it compares like for like.
+  Documented in `docs/traffic-analysis.md`.
+
 ## [0.14.0] — 2026-11-09
 
 ### Added
