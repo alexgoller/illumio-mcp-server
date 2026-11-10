@@ -82,6 +82,7 @@ from .credentials import (
 )
 from .sec_rules import handle_update_sec_rule, handle_delete_sec_rule
 from .identity import handle_build_identity_graph
+from .fingerprint import handle_get_traffic_fingerprint
 from .meta import handle_get_server_changelog
 from .capacity import handle_get_pce_capacity
 from .cloud_inventory import handle_cloud_get_resources
@@ -135,6 +136,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
     "get-traffic-flows-summary":  ToolSpec(handle_get_traffic_flows_summary,roles=ALL_ROLES),
     "get-traffic-timeline":       ToolSpec(handle_get_traffic_timeline,     roles=ALL_ROLES),
     "build-identity-graph":       ToolSpec(handle_build_identity_graph,     roles=ALL_ROLES),
+    "get-traffic-fingerprint":    ToolSpec(handle_get_traffic_fingerprint, roles=ALL_ROLES),
     "discover-process-egress":    ToolSpec(handle_discover_process_egress,    roles=ALL_ROLES),
     "find-unmanaged-traffic":     ToolSpec(handle_find_unmanaged_traffic,   roles=ALL_ROLES, unscopable=True),
     "find-unknown-endpoints":     ToolSpec(handle_find_unknown_endpoints,   roles=ALL_ROLES, unscopable=True),

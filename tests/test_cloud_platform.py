@@ -90,7 +90,7 @@ def test_hide_switch_overrides_configuration(configured, monkeypatch):
 def test_docs_generator_never_lists_feature_tools():
     import pathlib
     text = pathlib.Path("docs/tools.md").read_text()
-    assert "cloud-get-resources" not in text and "All 55 tools" in text
+    assert "cloud-get-resources" not in text and "All 56 tools" in text
 
 
 # --- client -------------------------------------------------------------------

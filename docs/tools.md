@@ -12,7 +12,7 @@ nav_order: 6
 
 ---
 
-All 55 tools, grouped by area. Generated from the server's own registry by
+All 56 tools, grouped by area. Generated from the server's own registry by
 `scripts/gen_tool_docs.py` -- do not edit by hand.
 
 **Access** is the minimum role required. Roles are assigned from IdP group membership in
@@ -87,6 +87,7 @@ Builds an app-to-app communication graph and com... |
 |---|---|---|---|
 | `find-unknown-endpoints` | reader | *read* | Which IP addresses show up in traffic that the PCE does not know as a workload at all, and what do they do. Unknown = Explorer... |
 | `find-unmanaged-traffic` | reader | *read* | Find traffic involving unmanaged (unlabeled) workloads or IP addresses. These are sources or destinations without app/env label... |
+| `get-traffic-fingerprint` | reader | *read* | A snapshot of who talks to whom on which service -- for the whole org, one environment (scope={env}) or one app (scope={app, en... |
 | `get-traffic-flows` | reader | *read* | Get traffic flows from the PCE with comprehensive filtering options |
 | `get-traffic-flows-summary` | reader | *read* | Summarize traffic flows as structured JSON. Sections: by_process (which binary talks to which destination, on which port, under... |
 | `get-traffic-timeline` | reader | *read* | Time-bucketed flow counts from ONE Explorer query: how many flows and connections fell into each 15m/1h/6h/1d bucket of the win... |

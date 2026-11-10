@@ -2669,6 +2669,37 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get-traffic-fingerprint",
+            description=(
+                "A snapshot of who talks to whom on which service -- for the whole org, one environment "
+                "(scope={env}) or one app (scope={app, env}) -- and the drift against an earlier snapshot. "
+                "One Explorer query over the window; keys are app-pair x service with the decision set seen "
+                "(A allowed, P potentially blocked, B blocked), never counts, plus per-app shape: peers in/out, "
+                "external destinations and sources, services, blocked share, attributed providers. "
+                "Compare by passing `baseline` (the `fingerprint` object this tool returned before) or "
+                "`baseline_days` (a second query over the N days before the window): new / changed / gone keys, "
+                "drift per app, the peers and providers that came and went. A compare across another PCE, org, "
+                "scope or identity axis is refused; unequal windows and truncated sides are warned, since they "
+                "inflate new or gone. Use it for 'what changed in payments/prod since last month', 'is this "
+                "environment's shape stable', or to keep a per-app history."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {"type": "object", "description": "{app, env} for one app, {env} for an environment, omit for the org", "properties": {"app": {"type": "string"}, "env": {"type": "string"}}},
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to lookback_days ago"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD or ISO-8601 timestamp; defaults to today"},
+                    "lookback_days": {"type": "integer", "description": "Used when start_date is omitted (default 7)"},
+                    "baseline": {"type": "object", "description": "A `fingerprint` object returned by this tool earlier, to compare against. Must be of the same PCE, scope and identity_labels and carry its keys"},
+                    "baseline_days": {"type": "integer", "description": "Instead of `baseline`: also query the N days immediately before the window and compare against that (1..365). Equal to the window length for a like-for-like compare"},
+                    "identity_labels": {"type": "array", "items": {"type": "string"}, "description": "Label keys that identify an app (default [app, env])"},
+                    "policy_decisions": {"type": "array", "items": {"type": "string", "enum": ["allowed", "potentially_blocked", "blocked", "unknown"]}, "description": "Restrict both windows to these decisions (recorded in basis.filters)"},
+                    "exclude_workloads_from_ip_list_query": {"type": "boolean"},
+                    "max_results": {"type": "integer", "description": "Row cap per query (default 200000); a hit is recorded in coverage.truncated"},
+                },
+            },
+        ),
+        types.Tool(
             name="check-pce-connection",
             description="Is the PCE answering, and how fast. Probes GET /health first and returns JSON: status (ok | unreachable), health_http_status, health_round_trip_ms, total_seconds. On failure the error names the host, how long it waited and the HTTP status or timeout -- a 5xx is the PCE or its front end, a timeout is the network. Waits are bounded (MCP_PCE_RETRIES, MCP_PCE_REQUEST_TIMEOUT); run this first when any other tool returns tool_timeout.",
             inputSchema={

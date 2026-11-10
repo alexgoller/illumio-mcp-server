@@ -295,3 +295,60 @@ server-side (one query per direction), the peer x port table is complete
 instead of top-10, and a `timeline` is added using the same bucketing and
 spike rule as `get-traffic-timeline` (1h buckets up to two days, else 1d).
 An address that is in the inventory is answered as `known` without a query.
+
+---
+
+## Fingerprints: a snapshot of an app's, an environment's or the org's traffic shape
+
+```
+get-traffic-fingerprint  { "scope": { "app": "payments", "env": "prod" },
+                           "lookback_days": 7, "baseline_days": 7 }
+```
+
+A fingerprint is the set of **source, destination, service** keys seen in one
+window, each with the set of policy decisions it was seen with (`A` allowed,
+`P` potentially blocked, `B` blocked), plus per-app shape metrics derived from
+those keys: `peers_in`, `peers_out`, `external_destinations`,
+`external_sources`, `services`, `blocked_share` and the attributed
+`providers`. Identities are apps (`payments (prod)`) or, off the estate, the
+most stable name available: an FQDN, else the provider a published range
+attributes the address to, else the address. A managed workload without the
+identity labels is `unlabelled:<hostname>`, one identity per host.
+
+The scope decides the query. Omit it for the org, `{env}` for one environment,
+`{app, env}` for one app (the app on either side, so inbound and outbound in
+one answer). In an env or app scope the remote apps appear too, with
+`in_scope: false`: their metrics describe their side of that traffic, not the
+app.
+
+**Compare** by passing `baseline` (the `fingerprint` object this tool returned
+earlier, kept by the client) or `baseline_days` (a second query over the N
+days immediately before the window). The default window is exactly
+`lookback_days` long and ends now, so `baseline_days` equal to it is a
+like-for-like compare. The result lists `new`, `changed` (another decision
+set) and `gone` keys, `drift` (differences over baseline keys, 0 is "nothing
+moved"), `by_app` with the peers and external destinations that came and
+went, and `new_providers`.
+
+The rules are illumio-tui's (traffic compare, snapshot compare), so the two
+agree:
+
+- Keys are matched on identity, **never on counts**. Explorer returns lifetime
+  counters on records that overlap the window, so a count says nothing about
+  what happened inside it.
+- `first_detected` is not part of a key: a long-lived flow comes back as a
+  fresh record every day and would read as "new" forever.
+- A truncated side is recorded in `coverage` and named in
+  `compare.basis.warnings`: a truncated baseline inflates `new`, a truncated
+  recent window inflates `gone`. Unequal window lengths are warned the same way.
+- A compare across another PCE, org, scope, identity axis or query filter is
+  **refused** (`basis.comparable: false`, `basis.problems`), not fudged.
+
+A fingerprint that exceeds the response budget comes back without its keys
+(`keys_omitted: true`): the metrics survive, but it cannot serve as a
+`baseline` later. Use `baseline_days` for an in-call compare, or a narrower
+scope. On one live estate the whole org over 7 days was 3,117 keys in 190 KB.
+
+Keep a per-app history by saving each `fingerprint` and passing the previous
+one as `baseline`; the format is versioned (`fingerprint_version`) and a
+baseline this server cannot read is refused by number.
